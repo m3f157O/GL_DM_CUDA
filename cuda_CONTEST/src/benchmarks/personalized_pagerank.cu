@@ -46,8 +46,10 @@ int *x_gpu, *y_gpu;
 double *val_gpu, *pr_gpu;
 
 double *pr_tmp_gpu;
+int *outdegree_gpu;
 int V_size;
 int E_size;
+int outdegree_size;
 
 // Write GPU kernel here!
 
@@ -75,21 +77,21 @@ __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *v
     //printf("%d\n",i);
     //printf("%f\n",atomicAdd( & pr_tmp_gpu[x_gpu[i]], 1 ));
 
-/*    printf("THIS IS X GPU "); //read correctly
-    printf("%d\n",x_gpu[i]);
+//    printf("THIS IS X GPU "); //read correctly
+  //  printf("%d\n",x_gpu[i]);
 
-    printf("THIS IS Y GPU "); //read correctly
-    printf("%d\n",y_gpu[i]);
+    //printf("THIS IS Y GPU "); //read correctly
+    //printf("%d\n",y_gpu[i]);
 
-    */printf("THIS IS PR GPU ");
-    printf("%f\n",pr_gpu[i]);
+    //printf("THIS IS PR GPU ");
+    //printf("%f\n",pr_gpu[i]);*/
 
-    /*printf("THIS IS PR TEMP GPU ");
-    printf("%f\n",pr_tmp_gpu[i]);
+    //printf("THIS IS bastard val GPU ");
+    //printf("%f\n",val_gpu[i]);
 
 
-    printf("THIS IS VAL GPU ");
-    printf("%f\n",pr_tmp_gpu[i]);*/
+    //printf("THIS IS VAL GPU ");
+    //printf("%f\n",pr_tmp_gpu[i]);
 
     pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];  //explodes
     //pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];
@@ -106,15 +108,47 @@ __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *v
     printf("%f\n",pr_tmp_gpu[i]);*/
 }
 
-__global__ void initKernel(double *devPtr, const double val, int len)
+__global__ void initKernel(double *pr_gpu, const double vertexNumberInverse, int len)
+{
+
+    int dog=0;
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if(i<len)
+    {
+        pr_gpu[i] = vertexNumberInverse;
+        printf("%f",pr_gpu[i]);
+        dog++;
+    }
+}
+
+__global__ void initKernelOutdegree(const int *y_gpu, int* outdegree_gpu ,const int len) //todo verify correctness
 {
 
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     if(i<len)
     {
-        devPtr[i] = val;
-        printf("%f",devPtr[i]);
+        atomicAdd(&outdegree_gpu[y_gpu[i]], 1);
+        //if(y_gpu[i])
+        //devPtr[i] = 1/y_gpu[i];
+        //printf("%d\n",outdegree_gpu[y_gpu[i]]);
     }
+
+
+}
+
+__global__ void initKernelInverseValue(double *devPtr,const int *y_gpu, int* outdegree_gpu ,const int len)
+{
+
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if(i<len)
+    {
+        //if(y_gpu[i])
+        devPtr[i] = 1.0/outdegree_gpu[y_gpu[i]];
+        printf("%f\n",devPtr[i]);
+    }
+    //printf("%d\n",i);
+
+
 }
 
 
@@ -140,8 +174,8 @@ void personalized_pagerank_gpu_support(
 
         cudaMemset(pr_tmp_gpu, 0, V_size);  // ???
 
-        int N = V;
-        int threads_per_block = std::min(32,V);   //todo make sure that num blocks is always >0
+        int N = E;
+        int threads_per_block = std::min(1,V);   //todo fix this
         int num_blocks = N / threads_per_block;
         // Launch add() kernel on GPU
 
@@ -154,8 +188,8 @@ void personalized_pagerank_gpu_support(
 
 
         cudaError_t err = cudaGetLastError();
-       /* if (err != cudaSuccess)
-            printf("Error: %s\n", cudaGetErrorString(err));*/
+        if (err != cudaSuccess)
+            printf("Error: %s\n", cudaGetErrorString(err));
 
         /*////get dangling vector percentage
         double dangling_factor = dot_product_cpu(dangling_bitmap, pr, V); //TODO GPU
@@ -167,12 +201,12 @@ void personalized_pagerank_gpu_support(
         converged = err <= convergence_threshold; // ????*/
 
         err = cudaMemcpy(val, val_gpu, V_size ,cudaMemcpyDeviceToHost);
-       /* if (err != cudaSuccess) {
+        if (err != cudaSuccess) {
             fprintf(stderr,
                     "Failed to copy IN PAGERANK GPU SUPPORT from device to host (error code %s)!\n",
                     cudaGetErrorString(err));
             exit(EXIT_FAILURE);
-        }*/
+        }
      /**   std::ostringstream out;
         out.precision(3);
         std::cout << "[";
@@ -240,12 +274,13 @@ void PersonalizedPageRank::initialize_graph() {
     // Count how many edges start in each vertex (here, the source vertex is y as the matrix is transposed);
     int *outdegree = (int *) calloc(V, sizeof(int));
     for (int i = 0; i < E; i++) {
-        outdegree[y[i]]++;
+        outdegree[y[i]]++;   /////this is done in initKernelOutdegree
+        //printf("%d",outdegree[y[i]]);
     }
     // Divide each edge value by the outdegree of the source vertex;
     for (int i = 0; i < E; i++) {
     //// each node val is dependent on the number of outgoing edges
-        val[i] = 1.0 / outdegree[y[i]];
+        val[i] = 1.0 / outdegree[y[i]];  /////this is done in initKernelInverse
     }
     free(outdegree);
 }
@@ -264,16 +299,18 @@ void PersonalizedPageRank::alloc() {
     // Size of allocations
     V_size = V * sizeof(int);
     E_size = E * sizeof(double);
+    outdegree_size = E * sizeof(int);
 
 
 
     // Allocate space in VRAM
     cudaError_t err = cudaSuccess;
-    err = cudaMalloc((void **)&x_gpu, V_size);
-    cudaMalloc((void **)&y_gpu, V_size);
+    err = cudaMalloc((void **)&x_gpu, E_size);
+    cudaMalloc((void **)&y_gpu, E_size);
     cudaMalloc((void **)&val_gpu, E_size);
     cudaMalloc((void **)&pr_gpu, E_size);
     cudaMalloc((void **)&pr_tmp_gpu, E_size);
+    cudaMalloc((void **)&outdegree_gpu, outdegree_size);
 
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to allocate device vectors (error code %s)!\n",
@@ -317,24 +354,24 @@ void PersonalizedPageRank::reset() {
 
     double *pr_array = (double *)malloc(V*sizeof(double));
 
-    for(int i=0;i<V;i++)
+    /*for(int i=0;i<V;i++)
     {
         float e=pr.at(i);
         pr_array[i] = e;
         std::cout << pr_array[i] ;
         std::cout << "THIS IS THE DOG\n";
 
-    }
+    }*/
+
+
 
 
     //todo val is missing
     // Do any GPU reset here, and also transfer data to the GPU;
     // TODO!
     cudaError_t err = cudaSuccess;
-    cudaMemcpy(x_gpu, x_array, V_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(y_gpu, y_array, V_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(val_gpu, &val, E_size, cudaMemcpyHostToDevice);
-    err = cudaMemcpy(pr_gpu, pr_array, E_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(x_gpu, x_array, E_size, cudaMemcpyHostToDevice);
+    err = cudaMemcpy(y_gpu, y_array, E_size, cudaMemcpyHostToDevice);
 
     if (err != cudaSuccess) {
         fprintf(stderr,
@@ -352,14 +389,25 @@ void PersonalizedPageRank::reset() {
 void PersonalizedPageRank::execute(int iter) {
     // Do the GPU computation here, and also transfer results to the CPU;
     //TODO! (and save the GPU PPR values into the "pr" array)
-    //cudaMemset(pr_gpu, 1.0 / V, E_size);  // ???
+    cudaMemset(outdegree_gpu, 0, outdegree_size);  // ???
     int N = V;
     int threads_per_block = std::min(32,V);   //todo make sure that num blocks is always >0
     int num_blocks = N / threads_per_block;
+
     initKernel<<<num_blocks,threads_per_block>>> ( pr_gpu, 1.0 / V, E_size );
 
 
+    N = E;
+    threads_per_block = std::min(1,E);   //todo fix this ugly
+    num_blocks = N / threads_per_block;
 
+    initKernelOutdegree<<<num_blocks,threads_per_block>>> ( y_gpu,outdegree_gpu, E);
+    initKernelInverseValue<<<num_blocks,threads_per_block>>> ( val_gpu, y_gpu,outdegree_gpu, E);
+
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess)
+        printf("Error: %s\n", cudaGetErrorString(err));
     std::cout << "EXECUTE";
 
     personalized_pagerank_gpu_support(V, E, dangling.data(), personalization_vertex, pr.data(), val.data(), alpha, 1e-6, 100);
