@@ -40,6 +40,9 @@ using clock_type = chrono::high_resolution_clock;
 int *x_gpu, *y_gpu;
 double *val_gpu, *pr_gpu;
 
+int V_size;
+int E_size;
+
 // Write GPU kernel here!
 
 //////////////////////////////
@@ -103,8 +106,8 @@ void PersonalizedPageRank::alloc() {
     // TODO!
 
     // Size of allocations
-    int V_size = V * sizeof(int);
-    int E_size = E * sizeof(double);
+    V_size = V * sizeof(int);
+    E_size = E * sizeof(double);
 
     // Allocate space in VRAM
     cudaMalloc(&x_gpu, V_size);
@@ -132,10 +135,10 @@ void PersonalizedPageRank::reset() {
     // TODO!
 
     // Copy data from RAM to VRAM
-    cudaMemcpy(x_gpu, x, V_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(y_gpu, y, V_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(val_gpu, val, E_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(pr_gpu, pr, E_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(x_gpu, &x, V_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(y_gpu, &y, V_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(val_gpu, &val, E_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(pr_gpu, &pr, E_size, cudaMemcpyHostToDevice);
 }
 
 void PersonalizedPageRank::execute(int iter) {
