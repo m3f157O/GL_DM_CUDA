@@ -72,24 +72,24 @@ __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *v
   //  printf("THIS IS VAL\n");
     int i = threadIdx.x + blockIdx.x * blockDim.x;
  //   printf("%f\n",val_gpu[i]);
-    printf("%d\n",i);
+    //printf("%d\n",i);
     //printf("%f\n",atomicAdd( & pr_tmp_gpu[x_gpu[i]], 1 ));
 
-    printf("THIS IS X GPU "); //read correctly
+/*    printf("THIS IS X GPU "); //read correctly
     printf("%d\n",x_gpu[i]);
 
     printf("THIS IS Y GPU "); //read correctly
     printf("%d\n",y_gpu[i]);
 
-    printf("THIS IS PR GPU ");
+    */printf("THIS IS PR GPU ");
     printf("%f\n",pr_gpu[i]);
 
-    printf("THIS IS PR TEMP GPU ");
+    /*printf("THIS IS PR TEMP GPU ");
     printf("%f\n",pr_tmp_gpu[i]);
 
 
     printf("THIS IS VAL GPU ");
-    printf("%f\n",pr_tmp_gpu[i]);
+    printf("%f\n",pr_tmp_gpu[i]);*/
 
     pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];  //explodes
     //pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];
@@ -104,6 +104,17 @@ __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *v
 
     printf("THIS IS PR TEMP GPU\n");
     printf("%f\n",pr_tmp_gpu[i]);*/
+}
+
+__global__ void initKernel(double *devPtr, const double val, int len)
+{
+
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if(i<len)
+    {
+        devPtr[i] = val;
+        printf("%f",devPtr[i]);
+    }
 }
 
 
@@ -303,7 +314,19 @@ void PersonalizedPageRank::reset() {
 
     x_array = &x[0];
     y_array = &y[0];
-    pr_array = &pr[0];
+
+    double *pr_array = (double *)malloc(V*sizeof(double));
+
+    for(int i=0;i<V;i++)
+    {
+        float e=pr.at(i);
+        pr_array[i] = e;
+        std::cout << pr_array[i] ;
+        std::cout << "THIS IS THE DOG\n";
+
+    }
+
+
     //todo val is missing
     // Do any GPU reset here, and also transfer data to the GPU;
     // TODO!
@@ -329,7 +352,14 @@ void PersonalizedPageRank::reset() {
 void PersonalizedPageRank::execute(int iter) {
     // Do the GPU computation here, and also transfer results to the CPU;
     //TODO! (and save the GPU PPR values into the "pr" array)
-    cudaMemset(pr_gpu, 1.0 / V, E_size);  // ???
+    //cudaMemset(pr_gpu, 1.0 / V, E_size);  // ???
+    int N = V;
+    int threads_per_block = std::min(32,V);   //todo make sure that num blocks is always >0
+    int num_blocks = N / threads_per_block;
+    initKernel<<<num_blocks,threads_per_block>>> ( pr_gpu, 1.0 / V, E_size );
+
+
+
     std::cout << "EXECUTE";
 
     personalized_pagerank_gpu_support(V, E, dangling.data(), personalization_vertex, pr.data(), val.data(), alpha, 1e-6, 100);
@@ -354,7 +384,6 @@ void PersonalizedPageRank::cpu_validation(int iter) {
     auto end_tmp = clock_type::now();
     auto exec_time = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
     std::cout << "exec time CPU=" << double(exec_time) / 1000 << " ms" << std::endl;
-    cuda_hello<<<1,1>>>();
 
     // Obtain the vertices with highest PPR value;
     std::vector<std::pair<int, double>> sorted_pr_tuples = sort_pr(pr.data(), V);
