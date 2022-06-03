@@ -40,6 +40,7 @@ using clock_type = chrono::high_resolution_clock;
 int *x_gpu, *y_gpu;
 double *val_gpu, *pr_gpu;
 
+double *pr_tmp_gpu;
 int V_size;
 int E_size;
 
@@ -47,9 +48,90 @@ int E_size;
 
 //////////////////////////////
 //////////////////////////////
+__global__ void cuda_hello(){
+    printf("this is working");
+
+}
+/*
+ * inline void spmv_coo_cpu(const int *x, const int *y, const double *val, const double *vec, double *result, int N) {
+    for (int i = 0; i < N; i++) {
+        //// the value of each node is the summation of the value of outgoing nodes * the previous pagerank score
+        result[x[i]] += val[i] * vec[y[i]];
+    }
+}
+ */
+__global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu){
+
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];
+
+
+}
+
 
 // CPU Utility functions;
+void personalized_pagerank_gpu_support(
+        const int V,
+        const int E,
+        const int *dangling_bitmap,
+        const int personalization_vertex,
+        double *pr,
+        double *val,
+        double alpha=DEFAULT_ALPHA,
+        double convergence_threshold=DEFAULT_CONVERGENCE,
+        const int max_iterations=DEFAULT_MAX_ITER
+        ){
 
+    // Temporary PPR result;
+
+    int iter = 0;  //stay on cpu
+    bool converged = false; //stay on cpu
+    while (!converged && iter < max_iterations) {     //stay on cpu
+        std::cout << "1\n";
+
+        cudaMemset(pr_tmp_gpu, 0, V_size);  // ???
+        std::cout << "2\n";
+
+        int N = V;
+        int threads_per_block = 512;
+        int num_blocks = N / threads_per_block;
+        // Launch add() kernel on GPU
+        std::cout << "3\n";
+
+        spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu);
+
+
+        /*////get dangling vector percentage
+        double dangling_factor = dot_product_cpu(dangling_bitmap, pr, V); //TODO GPU
+        ////alpha choose next link, pr_tmp, beta is a priori probability (?????) that next chosen is dangling over V
+        axpb_personalized_cpu(alpha, pr_tmp, alpha * dangling_factor / V, personalization_vertex, pr_tmp, V); //TODO GPU
+
+        // Check convergence;
+        double err = euclidean_distance_cpu(pr, pr_tmp, V); //TODO GPU
+        converged = err <= convergence_threshold; // ????*/
+
+        cudaMemcpy(val, val_gpu, V_size ,cudaMemcpyDeviceToHost);
+
+        std::ostringstream out;
+        out.precision(3);
+        std::cout << "[";
+        for (int i = 0; i < std::min(20, V); i++) {
+            std::cout << val[i] << ", ";
+        }
+        std::cout << "...]";
+
+        // Update the PageRank vector;
+
+        cudaMemcpy(pr_gpu, pr_tmp_gpu, V_size ,cudaMemcpyDeviceToDevice);
+        cudaMemcpy(pr, pr_gpu, V_size ,cudaMemcpyDeviceToHost);
+        iter++;
+    }
+
+
+
+
+    //free(pr_tmp);
+}
 // Read the input graph and initialize it;
 void PersonalizedPageRank::initialize_graph() {
     // Read the graph from an MTX file;
@@ -89,7 +171,8 @@ void PersonalizedPageRank::initialize_graph() {
     }
     // Divide each edge value by the outdegree of the source vertex;
     for (int i = 0; i < E; i++) {
-        val[i] = 1.0 / outdegree[y[i]];  
+    //// each node val is dependent on the number of outgoing edges
+        val[i] = 1.0 / outdegree[y[i]];
     }
     free(outdegree);
 }
@@ -114,6 +197,7 @@ void PersonalizedPageRank::alloc() {
     cudaMalloc(&y_gpu, V_size);
     cudaMalloc(&val_gpu, E_size);
     cudaMalloc(&pr_gpu, E_size);
+    cudaMalloc(&pr_tmp_gpu, E_size);
 }
 
 // Initialize data;
@@ -143,20 +227,40 @@ void PersonalizedPageRank::reset() {
 
 void PersonalizedPageRank::execute(int iter) {
     // Do the GPU computation here, and also transfer results to the CPU;
+    std::cout << "Hello World from GPU!\n";
     //TODO! (and save the GPU PPR values into the "pr" array)
+    cudaMemset(pr_gpu, 1.0 / V, E_size);  // ???
+    std::cout << "Hello World from GPU!\n";
+
+    double *pr_tmp = (double *) malloc(sizeof(double) * V);
+    std::cout << "Hello World from GPU!\n";
+
+    memset(pr_tmp, 0, sizeof(double) * V);  // ???
+    std::cout << "Hello World from GPU!\n";
+
+    personalized_pagerank_gpu_support(V, E, dangling.data(), personalization_vertex, pr.data(), val.data(), alpha, 1e-6, 100);
+
+
+
 }
 
 void PersonalizedPageRank::cpu_validation(int iter) {
 
     // Reset the CPU PageRank vector (uniform initialization, 1 / V for each vertex);
+
+    ////// INITIALIZE DUMMY VECTOR WITH 1/V FLOAT
     std::fill(pr_golden.begin(), pr_golden.end(), 1.0 / V);
 
     // Do Personalized PageRank on CPU;
     auto start_tmp = clock_type::now();
+    /////// pass x (starting edge vertex) y (arriving edge vertex)  OK
+    /// val ( is all one at starting )
+    /// pr_golden (pagerank scores)
     personalized_pagerank_cpu(x.data(), y.data(), val.data(), V, E, pr_golden.data(), dangling.data(), personalization_vertex, alpha, 1e-6, 100);
     auto end_tmp = clock_type::now();
     auto exec_time = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
     std::cout << "exec time CPU=" << double(exec_time) / 1000 << " ms" << std::endl;
+    cuda_hello<<<1,1>>>();
 
     // Obtain the vertices with highest PPR value;
     std::vector<std::pair<int, double>> sorted_pr_tuples = sort_pr(pr.data(), V);
@@ -207,6 +311,7 @@ std::string PersonalizedPageRank::print_result(bool short_form) {
     }
 }
 
+
 void PersonalizedPageRank::clean() {
     // Delete any GPU data or additional CPU data;
     // TODO!
@@ -214,4 +319,5 @@ void PersonalizedPageRank::clean() {
     cudaFree(y_gpu);
     cudaFree(val_gpu);
     cudaFree(pr_gpu);
+    cudaFree(pr_tmp_gpu);
 }

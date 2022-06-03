@@ -36,6 +36,7 @@
 
 inline void spmv_coo_cpu(const int *x, const int *y, const double *val, const double *vec, double *result, int N) {
     for (int i = 0; i < N; i++) {
+        //// the value of each node is the summation of the value of outgoing nodes * the previous pagerank score
         result[x[i]] += val[i] * vec[y[i]];
     }
 }
@@ -53,6 +54,9 @@ inline void axpb_personalized_cpu(
     const int personalization_vertex, double *result, const int N) {
     double one_minus_alpha = 1 - alpha;
     for (int i = 0; i < N; i++) {
+
+        //// this X is not the usual X
+        ///multiply previous score for probability of passing to next link, result is scaled by percentage
         result[i] = alpha * x[i] + beta + ((personalization_vertex == i) ? one_minus_alpha : 0.0);
     }
 }
@@ -82,17 +86,20 @@ inline void personalized_pagerank_cpu(
     // Temporary PPR result;
     double *pr_tmp = (double *) malloc(sizeof(double) * V);
 
-    int iter = 0;
-    bool converged = false;
-    while (!converged && iter < max_iterations) {    
-        memset(pr_tmp, 0, sizeof(double) * V);
-        spmv_coo_cpu(x, y, val, pr, pr_tmp, E);
-        double dangling_factor = dot_product_cpu(dangling_bitmap, pr, V); 
-        axpb_personalized_cpu(alpha, pr_tmp, alpha * dangling_factor / V, personalization_vertex, pr_tmp, V);
+    int iter = 0;  //stay on cpu
+    bool converged = false; //stay on cpu
+    while (!converged && iter < max_iterations) {     //stay on cpu
+        memset(pr_tmp, 0, sizeof(double) * V);  // ???
+        spmv_coo_cpu(x, y, val, pr, pr_tmp, E); //TODO GPU
+
+        ////get dangling vector percentage
+        double dangling_factor = dot_product_cpu(dangling_bitmap, pr, V); //TODO GPU
+        ////alpha choose next link, pr_tmp, beta is a priori proability (?????) that next chosen is dangling over V
+        axpb_personalized_cpu(alpha, pr_tmp, alpha * dangling_factor / V, personalization_vertex, pr_tmp, V); //TODO GPU
 
         // Check convergence;
-        double err = euclidean_distance_cpu(pr, pr_tmp, V);
-        converged = err <= convergence_threshold;
+        double err = euclidean_distance_cpu(pr, pr_tmp, V); //TODO GPU
+        converged = err <= convergence_threshold; // ????
 
         // Update the PageRank vector;
         memcpy(pr, pr_tmp, sizeof(double) * V);
