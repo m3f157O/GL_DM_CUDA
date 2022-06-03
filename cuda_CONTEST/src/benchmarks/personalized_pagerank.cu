@@ -36,6 +36,11 @@ using clock_type = chrono::high_resolution_clock;
 //////////////////////////////
 //////////////////////////////
 
+// Pointers for converted vector
+
+int* x_array;
+int* y_array;
+double* pr_array;
 // Pointers for VRAM data
 int *x_gpu, *y_gpu;
 double *val_gpu, *pr_gpu;
@@ -67,8 +72,26 @@ __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *v
   //  printf("THIS IS VAL\n");
     int i = threadIdx.x + blockIdx.x * blockDim.x;
  //   printf("%f\n",val_gpu[i]);
+    printf("%d\n",i);
+    //printf("%f\n",atomicAdd( & pr_tmp_gpu[x_gpu[i]], 1 ));
 
-    pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];
+    printf("THIS IS X GPU "); //read correctly
+    printf("%d\n",x_gpu[i]);
+
+    printf("THIS IS Y GPU "); //read correctly
+    printf("%d\n",y_gpu[i]);
+
+    printf("THIS IS PR GPU ");
+    printf("%f\n",pr_gpu[i]);
+
+    printf("THIS IS PR TEMP GPU ");
+    printf("%f\n",pr_tmp_gpu[i]);
+
+
+    printf("THIS IS VAL GPU ");
+    printf("%f\n",pr_tmp_gpu[i]);
+
+    pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];  //explodes
     //pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];
    /* printf("%d\n",i);
     //printf("%f\n",atomicAdd( & pr_tmp_gpu[x_gpu[i]], 1 ));
@@ -278,13 +301,17 @@ void PersonalizedPageRank::reset() {
     if (debug) std::cout << "personalization vertex=" << personalization_vertex << std::endl;
     std::cout << "RESET";
 
+    x_array = &x[0];
+    y_array = &y[0];
+    pr_array = &pr[0];
+    //todo val is missing
     // Do any GPU reset here, and also transfer data to the GPU;
     // TODO!
     cudaError_t err = cudaSuccess;
-    err = cudaMemcpy(x_gpu, &x, V_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(y_gpu, &y, V_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(x_gpu, x_array, V_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(y_gpu, y_array, V_size, cudaMemcpyHostToDevice);
     cudaMemcpy(val_gpu, &val, E_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(pr_gpu, &pr, E_size, cudaMemcpyHostToDevice);
+    err = cudaMemcpy(pr_gpu, pr_array, E_size, cudaMemcpyHostToDevice);
 
     if (err != cudaSuccess) {
         fprintf(stderr,
