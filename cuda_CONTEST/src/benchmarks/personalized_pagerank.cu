@@ -60,12 +60,27 @@ __global__ void cuda_hello(){
     }
 }
  */
-__global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu){
+__global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int V){
 
+
+    //val_gpu, , pr_gpu, pr_tmp_gpu are all OK
+  //  printf("THIS IS VAL\n");
     int i = threadIdx.x + blockIdx.x * blockDim.x;
+ //   printf("%f\n",val_gpu[i]);
+
     pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];
+    //pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];
+   /* printf("%d\n",i);
+    //printf("%f\n",atomicAdd( & pr_tmp_gpu[x_gpu[i]], 1 ));
 
+    printf("THIS IS X GPU\n");
+    printf("%d\n",x_gpu[i]);
 
+    printf("THIS IS PR GPU\n");
+    printf("%f\n",pr_gpu[i]);
+
+    printf("THIS IS PR TEMP GPU\n");
+    printf("%f\n",pr_tmp_gpu[i]);*/
 }
 
 
@@ -87,19 +102,26 @@ void personalized_pagerank_gpu_support(
     int iter = 0;  //stay on cpu
     bool converged = false; //stay on cpu
     while (!converged && iter < max_iterations) {     //stay on cpu
-        std::cout << "1\n";
+
 
         cudaMemset(pr_tmp_gpu, 0, V_size);  // ???
-        std::cout << "2\n";
 
         int N = V;
-        int threads_per_block = 512;
+        int threads_per_block = std::min(32,V);   //todo make sure that num blocks is always >0
         int num_blocks = N / threads_per_block;
         // Launch add() kernel on GPU
-        std::cout << "3\n";
 
-        spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu);
+        //spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu,V);
+        spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu,V);
 
+
+        cudaDeviceSynchronize();
+
+
+
+        cudaError_t err = cudaGetLastError();
+       /* if (err != cudaSuccess)
+            printf("Error: %s\n", cudaGetErrorString(err));*/
 
         /*////get dangling vector percentage
         double dangling_factor = dot_product_cpu(dangling_bitmap, pr, V); //TODO GPU
@@ -110,20 +132,37 @@ void personalized_pagerank_gpu_support(
         double err = euclidean_distance_cpu(pr, pr_tmp, V); //TODO GPU
         converged = err <= convergence_threshold; // ????*/
 
-        cudaMemcpy(val, val_gpu, V_size ,cudaMemcpyDeviceToHost);
-
-        std::ostringstream out;
+        err = cudaMemcpy(val, val_gpu, V_size ,cudaMemcpyDeviceToHost);
+       /* if (err != cudaSuccess) {
+            fprintf(stderr,
+                    "Failed to copy IN PAGERANK GPU SUPPORT from device to host (error code %s)!\n",
+                    cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
+        }*/
+     /**   std::ostringstream out;
         out.precision(3);
         std::cout << "[";
         for (int i = 0; i < std::min(20, V); i++) {
             std::cout << val[i] << ", ";
         }
-        std::cout << "...]";
+        std::cout << "...]";*/
 
         // Update the PageRank vector;
 
-        cudaMemcpy(pr_gpu, pr_tmp_gpu, V_size ,cudaMemcpyDeviceToDevice);
-        cudaMemcpy(pr, pr_gpu, V_size ,cudaMemcpyDeviceToHost);
+      /*  err = cudaMemcpy(pr_gpu, pr_tmp_gpu, V_size ,cudaMemcpyDeviceToDevice);
+        if (err != cudaSuccess) {
+            fprintf(stderr,
+                    "Failed to copy IN PAGERANK GPU SUPPORT from device to host (error code %s)!\n",
+                    cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
+        }*/
+        err = cudaMemcpy(pr, pr_gpu, V_size ,cudaMemcpyDeviceToHost);
+        /*if (err != cudaSuccess) {
+            fprintf(stderr,
+                    "Failed to copy IN PAGERANK GPU SUPPORT from device to host (error code %s)!\n",
+                    cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
+        }*/
         iter++;
     }
 
@@ -192,18 +231,41 @@ void PersonalizedPageRank::alloc() {
     V_size = V * sizeof(int);
     E_size = E * sizeof(double);
 
+
+
     // Allocate space in VRAM
-    cudaMalloc(&x_gpu, V_size);
-    cudaMalloc(&y_gpu, V_size);
-    cudaMalloc(&val_gpu, E_size);
-    cudaMalloc(&pr_gpu, E_size);
-    cudaMalloc(&pr_tmp_gpu, E_size);
+    cudaError_t err = cudaSuccess;
+    err = cudaMalloc((void **)&x_gpu, V_size);
+    cudaMalloc((void **)&y_gpu, V_size);
+    cudaMalloc((void **)&val_gpu, E_size);
+    cudaMalloc((void **)&pr_gpu, E_size);
+    cudaMalloc((void **)&pr_tmp_gpu, E_size);
+
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Failed to allocate device vectors (error code %s)!\n",
+                cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
 }
 
 // Initialize data;
 void PersonalizedPageRank::init() {
     // Do any additional CPU or GPU setup here;
     // TODO!
+
+    std::cout << "INITIALIZING";
+    /*cudaError_t err = cudaSuccess;
+    err = cudaMemcpy(x_gpu, &x, V_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(y_gpu, &y, V_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(val_gpu, &val, E_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(pr_gpu, &pr, E_size, cudaMemcpyHostToDevice);
+
+    if (err != cudaSuccess) {
+        fprintf(stderr,
+                "Failed to copy IN INIT from host to device (error code %s)!\n",
+                cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }*/
 }
 
 // Reset the state of the computation after every iteration.
@@ -214,29 +276,34 @@ void PersonalizedPageRank::reset() {
     // Generate a new personalization vertex for this iteration;
     personalization_vertex = rand() % V;
     if (debug) std::cout << "personalization vertex=" << personalization_vertex << std::endl;
+    std::cout << "RESET";
 
     // Do any GPU reset here, and also transfer data to the GPU;
     // TODO!
-
-    // Copy data from RAM to VRAM
-    cudaMemcpy(x_gpu, &x, V_size, cudaMemcpyHostToDevice);
+    cudaError_t err = cudaSuccess;
+    err = cudaMemcpy(x_gpu, &x, V_size, cudaMemcpyHostToDevice);
     cudaMemcpy(y_gpu, &y, V_size, cudaMemcpyHostToDevice);
     cudaMemcpy(val_gpu, &val, E_size, cudaMemcpyHostToDevice);
     cudaMemcpy(pr_gpu, &pr, E_size, cudaMemcpyHostToDevice);
+
+    if (err != cudaSuccess) {
+        fprintf(stderr,
+                "Failed to copy IN RESET from host to device (error code %s)!\n",
+                cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+    // Copy data from RAM to VRAM
+
+
+
+
 }
 
 void PersonalizedPageRank::execute(int iter) {
     // Do the GPU computation here, and also transfer results to the CPU;
-    std::cout << "Hello World from GPU!\n";
     //TODO! (and save the GPU PPR values into the "pr" array)
     cudaMemset(pr_gpu, 1.0 / V, E_size);  // ???
-    std::cout << "Hello World from GPU!\n";
-
-    double *pr_tmp = (double *) malloc(sizeof(double) * V);
-    std::cout << "Hello World from GPU!\n";
-
-    memset(pr_tmp, 0, sizeof(double) * V);  // ???
-    std::cout << "Hello World from GPU!\n";
+    std::cout << "EXECUTE";
 
     personalized_pagerank_gpu_support(V, E, dangling.data(), personalization_vertex, pr.data(), val.data(), alpha, 1e-6, 100);
 
