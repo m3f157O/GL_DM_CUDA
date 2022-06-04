@@ -40,7 +40,7 @@ using clock_type = chrono::high_resolution_clock;
 
 int* x_array;
 int* y_array;
-double* pr_array;
+double *pr_array, *val_array, *pr_tmp_array;
 // Pointers for VRAM data
 int *x_gpu, *y_gpu;
 double *val_gpu, *pr_gpu;
@@ -83,17 +83,18 @@ __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *v
     //printf("THIS IS Y GPU "); //read correctly
     //printf("%d\n",y_gpu[i]);
 
-    //printf("THIS IS PR GPU ");
-    //printf("%f\n",pr_gpu[i]);*/
+    /*printf("THIS IS PR GPU ");
+    printf("%f\n",pr_gpu[i]);*/
 
-    //printf("THIS IS bastard val GPU ");
-    //printf("%f\n",val_gpu[i]);
+    /*printf("THIS IS bastard PR_TMP GPU ");
+    printf("%f\n",pr_tmp_gpu[i]);*/
 
 
     //printf("THIS IS VAL GPU ");
-    //printf("%f\n",pr_tmp_gpu[i]);
+    //printf("%f\n",val_gpu[i]);
 
-    pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];  //explodes
+    atomicAdd(&pr_tmp_gpu[x_gpu[i]], val_gpu[i] * pr_gpu[y_gpu[i]]);
+    //pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];  //explodes
     //pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];
    /* printf("%d\n",i);
     //printf("%f\n",atomicAdd( & pr_tmp_gpu[x_gpu[i]], 1 ));
@@ -116,7 +117,7 @@ __global__ void initKernel(double *pr_gpu, const double vertexNumberInverse, int
     if(i<len)
     {
         pr_gpu[i] = vertexNumberInverse;
-        printf("%f",pr_gpu[i]);
+        //printf("%f",pr_gpu[i]);
         dog++;
     }
 }
@@ -144,7 +145,7 @@ __global__ void initKernelInverseValue(double *devPtr,const int *y_gpu, int* out
     {
         //if(y_gpu[i])
         devPtr[i] = 1.0/outdegree_gpu[y_gpu[i]];
-        printf("%f\n",devPtr[i]);
+        //printf("%f\n",devPtr[i]);
     }
     //printf("%d\n",i);
 
@@ -224,7 +225,7 @@ void personalized_pagerank_gpu_support(
                     cudaGetErrorString(err));
             exit(EXIT_FAILURE);
         }*/
-        err = cudaMemcpy(pr, pr_gpu, V_size ,cudaMemcpyDeviceToHost);
+        err = cudaMemcpy(pr_array, pr_gpu, V_size ,cudaMemcpyDeviceToHost);
         /*if (err != cudaSuccess) {
             fprintf(stderr,
                     "Failed to copy IN PAGERANK GPU SUPPORT from device to host (error code %s)!\n",
@@ -297,8 +298,8 @@ void PersonalizedPageRank::alloc() {
     // TODO!
 
     // Size of allocations
-    V_size = V * sizeof(int);
-    E_size = E * sizeof(double);
+    V_size = V * sizeof(double);
+    E_size = E * sizeof(int);
     outdegree_size = E * sizeof(int);
 
 
@@ -307,9 +308,9 @@ void PersonalizedPageRank::alloc() {
     cudaError_t err = cudaSuccess;
     err = cudaMalloc((void **)&x_gpu, E_size);
     cudaMalloc((void **)&y_gpu, E_size);
-    cudaMalloc((void **)&val_gpu, E_size);
-    cudaMalloc((void **)&pr_gpu, E_size);
-    cudaMalloc((void **)&pr_tmp_gpu, E_size);
+    cudaMalloc((void **)&val_gpu, V_size);
+    cudaMalloc((void **)&pr_gpu, V_size);
+    cudaMalloc((void **)&pr_tmp_gpu, V_size);
     cudaMalloc((void **)&outdegree_gpu, outdegree_size);
 
     if (err != cudaSuccess) {
@@ -352,7 +353,10 @@ void PersonalizedPageRank::reset() {
     x_array = &x[0];
     y_array = &y[0];
 
-    double *pr_array = (double *)malloc(V*sizeof(double));
+    pr_array = &pr[0];
+    val_array = &val[0];
+    std::vector<double> pr_tmp;
+    pr_tmp_array = &pr_tmp[0];
 
     /*for(int i=0;i<V;i++)
     {
@@ -394,7 +398,7 @@ void PersonalizedPageRank::execute(int iter) {
     int threads_per_block = std::min(32,V);   //todo make sure that num blocks is always >0
     int num_blocks = N / threads_per_block;
 
-    initKernel<<<num_blocks,threads_per_block>>> ( pr_gpu, 1.0 / V, E_size );
+    initKernel<<<num_blocks,threads_per_block>>> ( pr_gpu, 1.0 / V, V_size );
 
 
     N = E;
