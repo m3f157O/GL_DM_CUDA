@@ -47,7 +47,6 @@ int *x_gpu, *y_gpu;
 double *val_gpu, *pr_gpu;
 
 // Temporary arrays
-double *dang_temp_gpu;
 double *dangling_factor_gpu;
 
 double *pr_tmp_gpu;
@@ -76,43 +75,9 @@ __global__ void cuda_hello(){
 __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int V){
 
 
-    //val_gpu, , pr_gpu, pr_tmp_gpu are all OK
-  //  printf("THIS IS VAL\n");
     int i = threadIdx.x + blockIdx.x * blockDim.x;
- //   printf("%f\n",val_gpu[i]);
-    //printf("%d\n",i);
-    //printf("%f\n",atomicAdd( & pr_tmp_gpu[x_gpu[i]], 1 ));
-
-//    printf("THIS IS X GPU "); //read correctly
-  //  printf("%d\n",x_gpu[i]);
-
-    //printf("THIS IS Y GPU "); //read correctly
-    //printf("%d\n",y_gpu[i]);
-
-    /*printf("THIS IS PR GPU ");
-    printf("%f\n",pr_gpu[i]);*/
-
-    /*printf("THIS IS bastard PR_TMP GPU ");
-    printf("%f\n",pr_tmp_gpu[i]);*/
-
-
-    //printf("THIS IS VAL GPU ");
-    //printf("%f\n",val_gpu[i]);
-
     atomicAdd(&pr_tmp_gpu[x_gpu[i]], val_gpu[i] * pr_gpu[y_gpu[i]]);
-    //pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];  //explodes
-    //pr_tmp_gpu[x_gpu[i]] += val_gpu[i] * pr_gpu[y_gpu[i]];
-   /* printf("%d\n",i);
-    //printf("%f\n",atomicAdd( & pr_tmp_gpu[x_gpu[i]], 1 ));
 
-    printf("THIS IS X GPU\n");
-    printf("%d\n",x_gpu[i]);
-
-    printf("THIS IS PR GPU\n");
-    printf("%f\n",pr_gpu[i]);
-
-    printf("THIS IS PR TEMP GPU\n");
-    printf("%f\n",pr_tmp_gpu[i]);*/
 }
 
 __global__ void dot_product_gpu(int *dangling_bitmap_gpu, double *pr_gpu, int V, double *dangling_factor_gpu) {
@@ -127,16 +92,33 @@ __global__ void dot_product_gpu(int *dangling_bitmap_gpu, double *pr_gpu, int V,
     //printf("%f",dangling_factor_gpu[0]);
 }
 
-__global__ void initKernel(double *pr_gpu, const double vertexNumberInverse, int len)
+__global__ void initKernel(double *pr_gpu, int len)
 {
 
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     if(i<len)
     {
-        pr_gpu[i] = vertexNumberInverse;
+        pr_gpu[i] = 1.0/len;
         printf("%f",pr_gpu[i]);
         //printf("%f",pr_gpu[i]);
     }
+}
+
+
+__global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, double alpha_dangling_onV, int personalization_vertex, double* pr_tmp_result, int len)
+{
+
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if(i<len)
+    {
+        //if(y_gpu[i])
+        pr_tmp_result[i]=alpha * pr_tmp[i] + alpha_dangling_onV + ((personalization_vertex == i) ? one_minus_a : 0.0);
+        //printf("%f\n",devPtr[i]);
+        printf("pr temp gpu : %f\n",pr_tmp_result[i]);
+
+    }
+
+
 }
 
 
@@ -185,7 +167,6 @@ void personalized_pagerank_gpu_support(
         if (err != cudaSuccess)
             printf("from pr memset Error: %s\n", cudaGetErrorString(err));
 
-        cudaMemset(dang_temp_gpu, 0, V_size);  // ???
 
         err = cudaGetLastError();
         if (err != cudaSuccess)
@@ -212,6 +193,23 @@ void personalized_pagerank_gpu_support(
         if (err != cudaSuccess)
             printf("from dot product gpu  Error: %s\n", cudaGetErrorString(err));
 
+
+        double dangling;
+        err = cudaMemcpy(&dangling, dangling_gpu, sizeof(double) ,cudaMemcpyDeviceToHost);
+        if (err != cudaSuccess) {
+            fprintf(stderr,
+                    "Failed to copy dangling from device to host (error code %s)!\n",
+                    cudaGetErrorString(err));
+            exit(EXIT_FAILURE);
+        }
+
+
+        double new_dangling=dangling*alpha/V;
+        std::cout << dangling << "\n";
+
+
+        double one_minus_a=1-alpha;
+        axbp_custom<<<1,1>>>(alpha,one_minus_a, pr_tmp_gpu,new_dangling,personalization_vertex,pr_tmp_gpu,V);
 
 
         ////alpha choose next link, pr_tmp, beta is a priori probability (?????) that next chosen is dangling over V
@@ -332,7 +330,6 @@ void PersonalizedPageRank::alloc() {
     cudaMalloc((void **)&pr_gpu, V_size);
     cudaMalloc((void **)&pr_tmp_gpu, V_size);
     cudaMalloc((void **)&dangling_gpu, dangling_size);
-    cudaMalloc((void **)&dang_temp_gpu, V_size);
     cudaMalloc((void **)&dangling_factor_gpu, sizeof(double));
 
     if (err != cudaSuccess) {
@@ -387,8 +384,9 @@ void PersonalizedPageRank::reset() {
     cudaMemcpy(pr_gpu, pr_array, V_size, cudaMemcpyHostToDevice);
     cudaMemcpy(pr_tmp_gpu, pr_tmp_array, V_size, cudaMemcpyHostToDevice);
     cudaMemcpy(val_gpu, val_array, V_size, cudaMemcpyHostToDevice);
-    err = cudaMemcpy(dangling_gpu, dangling_array, dangling_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(dangling_gpu, dangling_array, dangling_size, cudaMemcpyHostToDevice);
 
+    printf("%d",personalization_vertex);
     if (err != cudaSuccess) {
         fprintf(stderr,
                 "Failed to copy IN RESET from host to device (error code %s)!\n",
@@ -409,7 +407,7 @@ void PersonalizedPageRank::execute(int iter) {
     int threads_per_block = std::min(1,V);   //todo make sure that num blocks is always >0
     int num_blocks = N / threads_per_block;
 
-    initKernel<<<V,1>>> ( pr_gpu , 1.0 / V , V );
+    initKernel<<<num_blocks,threads_per_block>>> ( pr_gpu , V );
 
 
 
