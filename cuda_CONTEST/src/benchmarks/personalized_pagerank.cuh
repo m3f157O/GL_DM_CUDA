@@ -31,7 +31,7 @@
 #include <unordered_set>
 #include <iterator>
 #include "../benchmark.cuh"
-
+#include <math.h>
 // CPU Utility functions;
 
 inline void spmv_coo_cpu(const int *x, const int *y, const double *val, const double *vec, double *result, int N) {
