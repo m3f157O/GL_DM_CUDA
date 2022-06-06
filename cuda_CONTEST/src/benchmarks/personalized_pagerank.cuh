@@ -38,6 +38,8 @@ inline void spmv_coo_cpu(const int *x, const int *y, const double *val, const do
     for (int i = 0; i < N; i++) {
         //// the value of each node is the summation of the value of outgoing nodes * the previous pagerank score
         result[x[i]] += val[i] * vec[y[i]];
+        printf("iteration %d pr temp cpu : %f\n",i,result[x[i]]);
+
     }
 }
 
@@ -49,15 +51,14 @@ inline double dot_product_cpu(const int *a, const double *b, const int N) {
     return result;
 }
 
-inline void axpb_personalized_cpu(
-    double alpha, double *x, double beta,
-    const int personalization_vertex, double *result, const int N) {
-    double one_minus_alpha = 1 - alpha;
+inline void axpb_personalized_cpu( double alpha, double *x, double beta, const int personalization_vertex, double *result, const int N) { double one_minus_alpha = 1 - alpha;
     for (int i = 0; i < N; i++) {
 
         //// this X is not the usual X
         ///multiply previous score for probability of passing to next link, result is scaled by percentage
         result[i] = alpha * x[i] + beta + ((personalization_vertex == i) ? one_minus_alpha : 0.0);
+        //printf("iteration %d pr temp cpu : %f\n",i,result[i]);
+
     }
 }
 
