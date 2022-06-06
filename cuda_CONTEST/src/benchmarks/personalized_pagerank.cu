@@ -47,7 +47,7 @@ int *x_gpu, *y_gpu;
 double *val_gpu, *pr_gpu;
 
 // Temporary arrays
-double *dangling_factor_gpu=0;
+double *dangling_factor_gpu;
 
 double *pr_tmp_gpu;
 int *dangling_gpu;
@@ -85,7 +85,7 @@ __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *v
     if(i<E)
     {
         atomicAdd(&pr_tmp_gpu[x_gpu[i]], val_gpu[i] * pr_gpu[y_gpu[i]]);
-        printf("iteration %d pr temp gpu : %f * %f = %f\n",i,val_gpu[i] , pr_gpu[y_gpu[i]],pr_tmp_gpu[x_gpu[i]]);
+        //printf("iteration %d pr temp gpu : %f * %f = %f\n",i,val_gpu[i] , pr_gpu[y_gpu[i]],pr_tmp_gpu[x_gpu[i]]);
     }
 
 }
@@ -172,6 +172,7 @@ void personalized_pagerank_gpu_support(
 
 
         cudaMemset(pr_tmp_gpu, 0, V_size);  // ???
+        cudaMemset(dangling_factor_gpu, 0, sizeof(double ));  // ???
 
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess)
@@ -183,7 +184,6 @@ void personalized_pagerank_gpu_support(
         int num_blocks = N / threads_per_block;
         // Launch add() kernel on GPU
 
-        cuda_hello<<<V,1>>>(val_gpu, V);
 
         //spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu,V);
         spmv_coo_gpu<<<E,1>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu,E);
@@ -360,7 +360,6 @@ void PersonalizedPageRank::reset() {
     x_array = &x[0];
     y_array = &y[0];
     dangling_array = &dangling[0];
-    dangling_factor_gpu=0;
     pr_array = &pr[0];
     val_array = &val[0];
     std::vector<double> pr_tmp;

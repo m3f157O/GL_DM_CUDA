@@ -38,7 +38,7 @@ inline void spmv_coo_cpu(const int *x, const int *y, const double *val, const do
     for (int i = 0; i < N; i++) {
         //// the value of each node is the summation of the value of outgoing nodes * the previous pagerank score
         result[x[i]] += val[i] * vec[y[i]];
-        printf("iteration %d pr temp cpu : %f\n",i,result[x[i]]);
+        //printf("iteration %d pr temp cpu : %f\n",i,result[x[i]]);
 
     }
 }
