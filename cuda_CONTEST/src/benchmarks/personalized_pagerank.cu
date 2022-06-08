@@ -61,26 +61,40 @@ int val_size;
 
 //////////////////////////////
 //////////////////////////////
+
 __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int E){
 
 
     int i = threadIdx.x + blockIdx.x * blockDim.x;
-    /*if(i<E)
-    {*/
+    if(i<E)
+    {
         atomicAdd(&pr_tmp_gpu[x_gpu[i]], val_gpu[i] * pr_gpu[y_gpu[i]]);
-        //printf("iteration %d pr temp gpu : %f * %f = %f\n",i,val_gpu[i] , pr_gpu[y_gpu[i]],pr_tmp_gpu[x_gpu[i]]);
-    //}
+
+    }
 
 }
 
-__global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int V, double *dangling_factor_gpu) {
+__global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int len, double *dangling_factor_gpu) {
 
     int i = threadIdx.x + blockIdx.x * blockDim.x;
 
-    /*printf("THIS IS Dangling: ");
-    printf("%f\n",dangling_bitmap_gpu[i]);*/
 
-    atomicAdd(dangling_factor_gpu, dangling_gpu[i] * pr_gpu[i]);
+    if(i<len)
+    {
+        atomicAdd(dangling_factor_gpu, dangling_gpu[i] * pr_gpu[i]);
+
+    }
+}
+
+__global__ void initKernel(double *pr_gpu, int len)
+{
+
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if(i<len)
+    {
+        pr_gpu[i] = 1.0/len;
+
+    }
 }
 
 
@@ -88,23 +102,22 @@ __global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, do
 {
 
     int i = threadIdx.x + blockIdx.x * blockDim.x;
-    /*if(i<len)
-    {*/
+    if(i<len)
+    {
         pr_tmp_result[i]=alpha * pr_tmp[i] + alpha_dangling_onV + ((personalization_vertex == i) ? one_minus_a : 0.0);
-        //printf("iteration %d pr temp gpu : %f\n",i,pr_tmp_result[i]);
 
-    //}
+    }
 
 
 }
 
 __global__ void euclidean_distance_gpu(double *err,double *pr, double *pr_tmp, int len) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
-    /*if(i<len)
-    {*/
+    if(i<len)
+    {
         double temp = pr[i]-pr_tmp[i];
         atomicAdd(err, temp*temp);
-    //}
+    }
 }
 
 
@@ -122,8 +135,17 @@ void personalized_pagerank_gpu_support(
         const int max_iterations=DEFAULT_MAX_ITER
         ){
 
-    // Temporary PPR result;
+    //make block size for E
+    int threads_per_block = 512;
+    int num_blocks = (E + threads_per_block - 1)/ threads_per_block;
 
+    //make block size for V
+
+    int threads_per_block_vertex = 64;
+    int num_blocks_vertex = (V + threads_per_block_vertex - 1)/ threads_per_block_vertex;
+
+    // Temporary PPR result;
+    //cudaError_t err = cudaGetLastError();
     int iter = 0;
     bool converged = false;
     while (!converged && iter < max_iterations) {
@@ -132,6 +154,7 @@ void personalized_pagerank_gpu_support(
         cudaMemset(pr_tmp_gpu, 0, V_size);  // ???
         cudaMemset(dangling_factor_gpu, 0, sizeof(double));  // ???
         cudaMemset(err_gpu, 0, sizeof(double));
+        //cudaError_t err = cudaGetLastError();
 
         /*cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess)
@@ -139,12 +162,12 @@ void personalized_pagerank_gpu_support(
 
 
         /*int N = E;
-        int threads_per_block = std::min(1,V);   //todo fix this
+        int threads_per_block = std::min(1,V);
         int num_blocks = N / threads_per_block;*/
         // Launch add() kernel on GPU
 
         //spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu,V);
-        spmv_coo_gpu<<<E,1>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu,E);
+        spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu,E);
 
         /*err = cudaGetLastError();
         if (err != cudaSuccess)
@@ -153,7 +176,7 @@ void personalized_pagerank_gpu_support(
         //cudaDeviceSynchronize();
 
 
-        dot_product_gpu<<<V,1>>>(dangling_gpu, pr_gpu, V, dangling_factor_gpu);
+        dot_product_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(dangling_gpu, pr_gpu, V, dangling_factor_gpu);
 
         /*err = cudaGetLastError();
         if (err != cudaSuccess)
@@ -173,9 +196,9 @@ void personalized_pagerank_gpu_support(
 
         //printf("dangling: %f", dangling);
 
-        axbp_custom<<<V,1>>>( alpha , 1-alpha , pr_tmp_gpu , dangling*alpha/V , personalization_vertex , pr_tmp_gpu , V);
+        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex>>>( alpha , 1-alpha , pr_tmp_gpu , dangling*alpha/V , personalization_vertex , pr_tmp_gpu , V);
 
-        euclidean_distance_gpu<<<V,1>>>(err_gpu, pr_gpu, pr_tmp_gpu, V);
+        euclidean_distance_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(err_gpu, pr_gpu, pr_tmp_gpu, V);
 
         double error;
         cudaMemcpy(&error, err_gpu, sizeof(double), cudaMemcpyDeviceToHost);
