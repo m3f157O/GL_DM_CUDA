@@ -47,7 +47,7 @@ int *x_gpu, *y_gpu;
 double *val_gpu, *pr_gpu;
 
 // Temporary arrays
-double *dangling_factor_gpu;
+double *dangling_factor_gpu, *err_gpu;
 
 double *pr_tmp_gpu;
 int *dangling_gpu;
@@ -131,6 +131,15 @@ __global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, do
 
 }
 
+__global__ void euclidean_distance_gpu(double *err,double *pr, double *pr_tmp, int len) {
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    if(i<len)
+    {
+        double temp = pr[i]-pr_tmp[i];
+        atomicAdd(err, temp*temp);
+    }
+}
+
 
 
 
@@ -172,7 +181,8 @@ void personalized_pagerank_gpu_support(
 
 
         cudaMemset(pr_tmp_gpu, 0, V_size);  // ???
-        cudaMemset(dangling_factor_gpu, 0, sizeof(double ));  // ???
+        cudaMemset(dangling_factor_gpu, 0, sizeof(double));  // ???
+        cudaMemset(err_gpu, 0, sizeof(double));
 
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess)
@@ -213,13 +223,23 @@ void personalized_pagerank_gpu_support(
             //exit(EXIT_FAILURE);
         }
 
-        printf("%d dangling\n", dangling);
+        //printf("dangling: %f", dangling);
 
         axbp_custom<<<V,1>>>( alpha , 1-alpha , pr_tmp_gpu , dangling*alpha/V , personalization_vertex , pr_tmp_gpu , V);
 
 
         ////alpha choose next link, pr_tmp, beta is a priori probability (?????) that next chosen is dangling over V
         //axpb_personalized_cpu(alpha, pr_tmp, alpha * dangling_factor / V, personalization_vertex, pr_tmp, V); //TODO GPU
+
+
+        euclidean_distance_gpu<<<V,1>>>(err_gpu, pr_gpu, pr_tmp_gpu, V);
+
+        double error = 1.0;
+        cudaMemcpy(&error, err_gpu, sizeof(double), cudaMemcpyDeviceToHost);
+        error = std::sqrt(error);
+
+        //printf("  ERROR_DISTANCE: %.7f\n", error);
+        converged = error <= convergence_threshold;
 
         // Check convergence;
         //double err = euclidean_distance_cpu(pr, pr_tmp, V); //TODO GPU
@@ -331,6 +351,7 @@ void PersonalizedPageRank::alloc() {
     cudaMalloc((void **)&pr_tmp_gpu, V_size);
     cudaMalloc((void **)&dangling_gpu, dangling_size);
     cudaMalloc((void **)&dangling_factor_gpu, sizeof(double));
+    cudaMalloc((void **)&err_gpu, sizeof(double));
 
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to allocate device vectors (error code %s)!\n",
@@ -364,12 +385,12 @@ void PersonalizedPageRank::reset() {
     val_array = &val[0];
     std::vector<double> pr_tmp;
     pr_tmp_array = &pr_tmp[0];
-    for(int i=0;i<V;i++)
+    /*for(int i=0;i<V;i++)
     {
         std::cout << val_array[i] ;
         std::cout << "THIS IS THE DOG\n";
 
-    }
+    }*/
 
 
 
