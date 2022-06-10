@@ -169,9 +169,6 @@ void PersonalizedPageRank::alloc() {
     // Load the input graph and preprocess it;
     initialize_graph();
 
-    // Allocate any GPU data here;
-    // TODO!
-
     // Size of allocations
     V_size = V * sizeof(double);
     dangling_size = V * sizeof(int); //ok
@@ -181,9 +178,8 @@ void PersonalizedPageRank::alloc() {
 
 
     // Allocate space in VRAM
-    /*cudaError_t err = cudaSuccess;
-    err = */cudaMalloc((void **)&x_gpu, E_size); //ok
-    cudaMalloc((void **)&y_gpu, E_size); // ok
+    cudaMalloc((void **)&x_gpu, E_size);
+    cudaMalloc((void **)&y_gpu, E_size);
     cudaMalloc((void **)&val_gpu, val_size);
     cudaMalloc((void **)&pr_gpu, V_size);
     cudaMalloc((void **)&pr_tmp_gpu, V_size);
@@ -192,20 +188,12 @@ void PersonalizedPageRank::alloc() {
     cudaMalloc((void **)&err_gpu, sizeof(double));
     cudaMalloc((void **)&beta_gpu, sizeof(double));
     cudaMalloc((void **)&V_gpu, sizeof(int));
-
-    /*if (err != cudaSuccess) {
-        fprintf(stderr, "Failed to allocate device vectors (error code %s)!\n",
-                cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }*/
 }
 
 // Initialize data;
 void PersonalizedPageRank::init() {
     // Do any additional CPU or GPU setup here;
-    // TODO!
 
-    //std::cout << "INITIALIZING";
 }
 
 // Reset the state of the computation after every iteration.
@@ -234,9 +222,8 @@ void PersonalizedPageRank::reset() {
 
 
 
-    //todo val is missing
+
     // Do any GPU reset here, and also transfer data to the GPU;
-    // TODO!
     cudaMemcpy(pr_gpu, pr_array, V_size, cudaMemcpyHostToDevice);
     cudaMemcpy(y_gpu, y_array, E_size, cudaMemcpyHostToDevice);
     cudaMemcpy(val_gpu, val_array, val_size, cudaMemcpyHostToDevice);
@@ -262,7 +249,6 @@ void PersonalizedPageRank::reset() {
 
 void PersonalizedPageRank::execute(int iteration) {
     // Do the GPU computation here, and also transfer results to the CPU;
-    //TODO! (and save the GPU PPR values into the "pr" array)
 
     max_iterations = 100;
     convergence_threshold = 1e-6;
@@ -319,7 +305,7 @@ void PersonalizedPageRank::execute(int iteration) {
             converged = std::sqrt(error) <= convergence_threshold;
         }
         end_tmp = clock_type::now();
-        if(iter==0) std::cout << "error management time: " << float(chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count()) / 1000 << "ms\n";
+        if(iter==15) std::cout << "error management time: " << float(chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count()) / 1000 << "ms\n";
 
         // Update the PageRank vector;
 
@@ -331,7 +317,7 @@ void PersonalizedPageRank::execute(int iteration) {
         //cudaMemcpy(pr_gpu, pr_tmp_gpu, V_gpu_size ,cudaMemcpyDeviceToDevice);
         iter++;
     }
-    cudaMemcpy(pr_array, pr_gpu, V_size ,cudaMemcpyDeviceToHost);
+    cudaMemcpy(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
 
 }
 
@@ -404,7 +390,6 @@ std::string PersonalizedPageRank::print_result(bool short_form) {
 
 void PersonalizedPageRank::clean() {
     // Delete any GPU data or additional CPU data;
-    // TODO!
     cudaFree(x_gpu);
     cudaFree(y_gpu);
     cudaFree(val_gpu);
@@ -413,4 +398,6 @@ void PersonalizedPageRank::clean() {
     cudaFree(dangling_gpu);
     cudaFree(dangling_factor_gpu);
     cudaFree(err_gpu);
+    cudaFree(beta_gpu);
+    cudaFree(V_gpu);
 }
