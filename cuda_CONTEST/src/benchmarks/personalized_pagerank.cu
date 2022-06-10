@@ -65,25 +65,26 @@ int val_size;
 __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int E){
 
 
-    int i = threadIdx.x + blockIdx.x * blockDim.x;
-    if(i<E)
+    int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
+    for(int i=thread_id;i<E;i+=blockDim.x*gridDim.x)
     {
         atomicAdd(&pr_tmp_gpu[x_gpu[i]], val_gpu[i] * pr_gpu[y_gpu[i]]);
 
     }
 
+
 }
 
 __global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int len, double *dangling_factor_gpu) {
 
-    int i = threadIdx.x + blockIdx.x * blockDim.x;
-
-
-    if(i<len)
+    int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
+    for(int i=thread_id;i<len;i+=blockDim.x*gridDim.x)
     {
         atomicAdd(dangling_factor_gpu, dangling_gpu[i] * pr_gpu[i]);
 
     }
+
+
 }
 
 __global__ void calculateBeta(double *beta, double *dangling, double alpha, int V)
@@ -100,28 +101,36 @@ __global__ void initKernel(double *pr_gpu, int len)
         pr_gpu[i] = 1.0/len;
 
     }
+
+
+
 }
 
 __global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, double *beta, int personalization_vertex, double* pr_tmp_result, int len)
 {
 
-    int i = threadIdx.x + blockIdx.x * blockDim.x;
-    if(i<len)
+
+
+    int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
+    for(int i=thread_id;i<len;i+=blockDim.x*gridDim.x)
     {
         pr_tmp_result[i]=alpha * pr_tmp[i] + (*beta) + ((personalization_vertex == i) ? one_minus_a : 0.0);
 
     }
 
-
 }
 
 __global__ void euclidean_distance_gpu(double *err,double *pr, double *pr_tmp, int len) {
-    int i = threadIdx.x + blockIdx.x * blockDim.x;
-    if(i<len)
+
+
+    int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
+    for(int i=thread_id;i<len;i+=blockDim.x*gridDim.x)
     {
         double temp = pr[i]-pr_tmp[i];
         atomicAdd(err, temp*temp);
     }
+
+
 }
 
 
