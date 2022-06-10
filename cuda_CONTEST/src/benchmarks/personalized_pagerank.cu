@@ -38,25 +38,7 @@ using clock_type = chrono::high_resolution_clock;
 
 // Pointers for converted vector
 
-int* x_array;
-int* y_array;
-int* dangling_array;
-double *pr_array, *val_array, *pr_tmp_array;
-// Pointers for VRAM data
-int *x_gpu, *y_gpu;
-int *V_gpu, *E_gpu;
-double *val_gpu, *pr_gpu;
-double error;
 
-// Temporary arrays
-double *dangling_factor_gpu, *err_gpu, *beta_gpu;
-
-double *pr_tmp_gpu;
-int *dangling_gpu;
-int V_size;
-int E_size;
-int dangling_size;
-int val_size;
 
 
 // Write GPU kernel here!
