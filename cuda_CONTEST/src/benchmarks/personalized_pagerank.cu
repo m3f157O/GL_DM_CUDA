@@ -47,7 +47,7 @@ int *x_gpu, *y_gpu;
 double *val_gpu, *pr_gpu;
 
 // Temporary arrays
-double *dangling_factor_gpu, *err_gpu;
+double *dangling_factor_gpu, *err_gpu, *beta_gpu;
 
 double *pr_tmp_gpu;
 int *dangling_gpu;
@@ -86,6 +86,11 @@ __global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int len, doub
     }
 }
 
+__global__ void calculateBeta(double *beta, double *dangling, double alpha, int V)
+{
+    (*beta) = (*dangling) * alpha / V;
+}
+
 __global__ void initKernel(double *pr_gpu, int len)
 {
 
@@ -97,13 +102,13 @@ __global__ void initKernel(double *pr_gpu, int len)
     }
 }
 
-__global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, double alpha_dangling_onV, int personalization_vertex, double* pr_tmp_result, int len)
+__global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, double *beta, int personalization_vertex, double* pr_tmp_result, int len)
 {
 
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     if(i<len)
     {
-        pr_tmp_result[i]=alpha * pr_tmp[i] + alpha_dangling_onV + ((personalization_vertex == i) ? one_minus_a : 0.0);
+        pr_tmp_result[i]=alpha * pr_tmp[i] + (*beta) + ((personalization_vertex == i) ? one_minus_a : 0.0);
 
     }
 
@@ -198,6 +203,7 @@ void PersonalizedPageRank::alloc() {
     cudaMalloc((void **)&dangling_gpu, dangling_size);
     cudaMalloc((void **)&dangling_factor_gpu, sizeof(double));
     cudaMalloc((void **)&err_gpu, sizeof(double));
+    cudaMalloc((void **)&beta_gpu, sizeof(double));
 
     /*if (err != cudaSuccess) {
         fprintf(stderr, "Failed to allocate device vectors (error code %s)!\n",
@@ -294,10 +300,9 @@ void PersonalizedPageRank::execute(int iteration) {
 
         dot_product_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(dangling_gpu, pr_gpu, V, dangling_factor_gpu);
 
-        double dangling = 0;
-        cudaMemcpy(&dangling, dangling_factor_gpu, sizeof(double) ,cudaMemcpyDeviceToHost);
+        calculateBeta<<<1,1>>>(beta_gpu, dangling_factor_gpu, alpha, V);
 
-        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, 1-alpha, pr_tmp_gpu, dangling*alpha/V, personalization_vertex, pr_tmp_gpu, V);
+        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, 1-alpha, pr_tmp_gpu, beta_gpu, personalization_vertex, pr_tmp_gpu, V);
 
         euclidean_distance_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(err_gpu, pr_gpu, pr_tmp_gpu, V);
 
