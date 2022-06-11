@@ -46,15 +46,13 @@ using clock_type = chrono::high_resolution_clock;
 //////////////////////////////
 //////////////////////////////
 
-__global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int E){
-
+__global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int E) {
 
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
-    for(int i=thread_id;i<E;i+=blockDim.x*gridDim.x){
+    for(int i=thread_id;i<E;i+=blockDim.x*gridDim.x) {
         atomicAdd(&pr_tmp_gpu[x_gpu[i]], val_gpu[i] * pr_gpu[y_gpu[i]]);
 
     }
-
 
 }
 
@@ -69,7 +67,7 @@ __global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int *V, doubl
 
 }
 
-__global__ void calculateBeta(double *beta, double *dangling, double alpha, int *V){
+__global__ void calculateBeta(double *beta, double *dangling, double alpha, int *V) {
 
     (*beta) = (*dangling) * alpha / (*V);
 }
@@ -82,14 +80,9 @@ __global__ void initKernel(double *pr_gpu, int len){
 
     }
 
-
-
 }
 
-__global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, double *beta, int personalization_vertex, double* pr_tmp_result, int *V)
-{
-
-
+__global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, double *beta, int personalization_vertex, double* pr_tmp_result, int *V) {
 
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
     for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
@@ -101,17 +94,33 @@ __global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, do
 
 __global__ void euclidean_distance_gpu(double *err,double *pr, double *pr_tmp, int *V) {
 
-
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
     for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
-        double temp = pr[i]-pr_tmp[i];
-        atomicAdd(err, temp*temp);
+        atomicAdd(err, (pr[i]-pr_tmp[i])*(pr[i]-pr_tmp[i]));
     }
-
 
 }
 
+__global__ void euclidean_distance_gpu_2(double *err,double *pr, double *pr_tmp, int *V) {
 
+    int tid = threadIdx.x;
+    int i = tid+blockIdx.x*blockDim.x;
+    if(i<(*V)) {
+        __shared__ double temp[64];
+        temp[tid] = (pr[i] - pr_tmp[i]) * (pr[i] - pr_tmp[i]);
+        __syncthreads();
+        for(unsigned int s = 1; s < blockDim.x; s *= 2) {
+            int index = 2 * s * tid;
+            if (index < blockDim.x) {
+                temp[index] += temp[index + s];
+            }
+            __syncthreads();
+        }
+
+        if(tid == 0) atomicAdd(err, temp[0]);
+
+    }
+}
 
 // CPU Utility functions;
 
@@ -229,21 +238,7 @@ void PersonalizedPageRank::reset() {
     cudaMemcpy(val_gpu, val_array, val_size, cudaMemcpyHostToDevice);
     cudaMemcpy(x_gpu, x_array, E_size, cudaMemcpyHostToDevice);
     cudaMemcpy(V_gpu, &V, sizeof(int), cudaMemcpyHostToDevice);
-    /*cudaError_t err = */cudaMemcpy(dangling_gpu, dangling_array, dangling_size, cudaMemcpyHostToDevice);
-
-
-
-    //cudaError_t err = cudaGetLastError();
-
-    /*if (err != cudaSuccess) {
-        fprintf(stderr,
-                "Failed to copy IN RESET from host to device (error code %s)!\n",
-                cudaGetErrorString(err));
-        exit(EXIT_FAILURE);
-    }*/
-    // Copy data from RAM to VRAM
-
-
+    cudaMemcpy(dangling_gpu, dangling_array, dangling_size, cudaMemcpyHostToDevice);
 
 }
 
@@ -320,7 +315,7 @@ void PersonalizedPageRank::execute(int iteration) {
         axbp_time += axbp_time_tmp;
 
         start_tmp = clock_type::now();
-        euclidean_distance_gpu<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(err_gpu, pr_gpu, pr_tmp_gpu, V_gpu);
+        euclidean_distance_gpu_2<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(err_gpu, pr_gpu, pr_tmp_gpu, V_gpu);
         end_tmp = clock_type::now();
         auto euclidean_distance_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
         euclidean_distance_time += euclidean_distance_time_tmp;
