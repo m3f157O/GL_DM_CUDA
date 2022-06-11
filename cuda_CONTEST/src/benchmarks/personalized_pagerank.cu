@@ -253,6 +253,16 @@ void PersonalizedPageRank::execute(int iteration) {
     max_iterations = 100;
     convergence_threshold = 1e-6;
 
+    cudaStream_t stream1, stream2;
+    cudaStream_t stream[max_iterations];
+    cudaStream_t stream_err[max_iterations];
+    cudaStreamCreate(&stream1);
+    cudaStreamCreate(&stream2);
+    for (int i = 0; i < max_iterations; ++i)
+        cudaStreamCreateWithFlags(&stream_err[i], cudaStreamNonBlocking);
+    for (int i = 0; i < max_iterations; ++i)
+        cudaStreamCreateWithFlags(&stream[i], cudaStreamNonBlocking);
+
     //make block size for E
     int threads_per_block = 512;
     int num_blocks = (E + threads_per_block - 1)/ threads_per_block;
@@ -273,70 +283,78 @@ void PersonalizedPageRank::execute(int iteration) {
     long axbp_time = 0;
     long euclidean_distance_time = 0;
     long error_management_time = 0;
+    long copy_time = 0;
+    long beta_time = 0;
     while (!converged && iter < max_iterations) {
 
         start_tmp = clock_type::now();
-        cudaMemset(pr_tmp_gpu, 0, V_size);
-        cudaMemset(dangling_factor_gpu, 0, sizeof(double));
-        cudaMemset(err_gpu, 0, sizeof(double));
+        cudaMemsetAsync(pr_tmp_gpu, 0, V_size, stream[iter]);
+        cudaMemsetAsync(dangling_factor_gpu, 0, sizeof(double), stream[iter]);
+        cudaMemsetAsync(err_gpu, 0, sizeof(double), stream[iter]);
         end_tmp = clock_type::now();
         auto memset_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
         memset_time += memset_time_tmp;
 
         start_tmp = clock_type::now();
-        spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, E);
+        spmv_coo_gpu<<<num_blocks,threads_per_block,0,stream[iter]>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, E);
         end_tmp = clock_type::now();
         auto spmv_coo_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
         spmv_coo_time += spmv_coo_time_tmp;
 
         start_tmp = clock_type::now();
-        dot_product_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(dangling_gpu, pr_gpu, V_gpu, dangling_factor_gpu);
+        dot_product_gpu<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(dangling_gpu, pr_gpu, V_gpu, dangling_factor_gpu);
         end_tmp = clock_type::now();
         auto dot_product_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
         dot_product_time += dot_product_time_tmp;
 
-        calculateBeta<<<1,1>>>(beta_gpu, dangling_factor_gpu, alpha, V_gpu);
+        start_tmp = clock_type::now();
+        calculateBeta<<<1,1,0,stream[iter]>>>(beta_gpu, dangling_factor_gpu, alpha, V_gpu);
+        end_tmp = clock_type::now();
+        auto beta_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+        beta_time += beta_time_tmp;
 
         start_tmp = clock_type::now();
-        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, 1-alpha, pr_tmp_gpu, beta_gpu, personalization_vertex, pr_tmp_gpu, V_gpu);
+        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(alpha, 1-alpha, pr_tmp_gpu, beta_gpu, personalization_vertex, pr_tmp_gpu, V_gpu);
         end_tmp = clock_type::now();
         auto axbp_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
         axbp_time += axbp_time_tmp;
 
         start_tmp = clock_type::now();
-        euclidean_distance_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(err_gpu, pr_gpu, pr_tmp_gpu, V_gpu);
+        euclidean_distance_gpu<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(err_gpu, pr_gpu, pr_tmp_gpu, V_gpu);
         end_tmp = clock_type::now();
         auto euclidean_distance_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
         euclidean_distance_time += euclidean_distance_time_tmp;
 
-        start_tmp = clock_type::now();
-        if(iter>max_iterations/10 && iter%5==0){
-            cudaMemcpy(&error, err_gpu, sizeof(double), cudaMemcpyDeviceToHost);
-            converged = std::sqrt(error) <= convergence_threshold;
-        }
-        end_tmp = clock_type::now();
-        auto error_management_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-        error_management_time += error_management_time_tmp;
-
         // Update the PageRank vector;
-
         temp=pr_gpu;
         pr_gpu=pr_tmp_gpu;
         pr_tmp_gpu=temp;
 
+        start_tmp = clock_type::now();
+        cudaMemcpyAsync(&error, err_gpu, sizeof(double), cudaMemcpyDeviceToHost, stream[iter]);
+        converged = std::sqrt(error) <= convergence_threshold;
+        end_tmp = clock_type::now();
+        auto error_management_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+        error_management_time += error_management_time_tmp;
 
-        //cudaMemcpy(pr_gpu, pr_tmp_gpu, V_gpu_size ,cudaMemcpyDeviceToDevice);
         iter++;
     }
 
     std::cout << "memset time: " << float(memset_time) / 1000 << "ms\n";
     std::cout << "spmv_coo time: " << float(spmv_coo_time) / 1000 << "ms\n";
     std::cout << "dot_product time: " << float(dot_product_time) / 1000 << "ms\n";
+    std::cout << "beta time: " << float(beta_time) / 1000 << "ms\n";
     std::cout << "axbp time: " << float(axbp_time) / 1000 << "ms\n";
     std::cout << "euclidean_distance time: " << float(euclidean_distance_time) / 1000 << "ms\n";
     std::cout << "error_management time: " << float(error_management_time) / 1000 << "ms\n";
 
+    start_tmp = clock_type::now();
     cudaMemcpy(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
+    end_tmp = clock_type::now();
+    auto copy_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+    copy_time += copy_time_tmp;
+
+    std::cout << "copy time: " << float(copy_time) / 1000 << "ms\n";
 
 }
 
