@@ -265,39 +265,49 @@ void PersonalizedPageRank::execute(int iteration) {
     double *temp;
     int iter = 0;
     bool converged = false;
+    auto start_tmp = clock_type::now();
+    auto end_tmp = clock_type::now();
+    long memset_time = 0;
+    long spmv_coo_time = 0;
+    long dot_product_time = 0;
+    long axbp_time = 0;
+    long euclidean_distance_time = 0;
+    long error_management_time = 0;
     while (!converged && iter < max_iterations) {
-
-        auto start_tmp = clock_type::now();
-        auto end_tmp = clock_type::now();
 
         start_tmp = clock_type::now();
         cudaMemset(pr_tmp_gpu, 0, V_size);
         cudaMemset(dangling_factor_gpu, 0, sizeof(double));
         cudaMemset(err_gpu, 0, sizeof(double));
         end_tmp = clock_type::now();
-        if(iter==0) std::cout << "memset time: " << float(chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count()) / 1000 << "ms\n";
+        auto memset_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+        memset_time += memset_time_tmp;
 
         start_tmp = clock_type::now();
         spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, E);
         end_tmp = clock_type::now();
-        if(iter==0) std::cout << "spmv_coo time: " << float(chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count()) / 1000 << "ms\n";
+        auto spmv_coo_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+        spmv_coo_time += spmv_coo_time_tmp;
 
         start_tmp = clock_type::now();
         dot_product_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(dangling_gpu, pr_gpu, V_gpu, dangling_factor_gpu);
         end_tmp = clock_type::now();
-        if(iter==0) std::cout << "dot_product time: " << float(chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count()) / 1000 << "ms\n";
+        auto dot_product_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+        dot_product_time += dot_product_time_tmp;
 
         calculateBeta<<<1,1>>>(beta_gpu, dangling_factor_gpu, alpha, V_gpu);
 
         start_tmp = clock_type::now();
         axbp_custom<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, 1-alpha, pr_tmp_gpu, beta_gpu, personalization_vertex, pr_tmp_gpu, V_gpu);
         end_tmp = clock_type::now();
-        if(iter==0) std::cout << "axbp time: " << float(chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count()) / 1000 << "ms\n";
+        auto axbp_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+        axbp_time += axbp_time_tmp;
 
         start_tmp = clock_type::now();
         euclidean_distance_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(err_gpu, pr_gpu, pr_tmp_gpu, V_gpu);
         end_tmp = clock_type::now();
-        if(iter==0) std::cout << "euclidean_distance time: " << float(chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count()) / 1000 << "ms\n";
+        auto euclidean_distance_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+        euclidean_distance_time += euclidean_distance_time_tmp;
 
         start_tmp = clock_type::now();
         if(iter>max_iterations/10 && iter%5==0){
@@ -305,7 +315,8 @@ void PersonalizedPageRank::execute(int iteration) {
             converged = std::sqrt(error) <= convergence_threshold;
         }
         end_tmp = clock_type::now();
-        if(iter==15) std::cout << "error management time: " << float(chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count()) / 1000 << "ms\n";
+        auto error_management_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+        error_management_time += error_management_time_tmp;
 
         // Update the PageRank vector;
 
@@ -317,6 +328,14 @@ void PersonalizedPageRank::execute(int iteration) {
         //cudaMemcpy(pr_gpu, pr_tmp_gpu, V_gpu_size ,cudaMemcpyDeviceToDevice);
         iter++;
     }
+
+    std::cout << "memset time: " << float(memset_time) / 1000 << "ms\n";
+    std::cout << "spmv_coo time: " << float(spmv_coo_time) / 1000 << "ms\n";
+    std::cout << "dot_product time: " << float(dot_product_time) / 1000 << "ms\n";
+    std::cout << "axbp time: " << float(axbp_time) / 1000 << "ms\n";
+    std::cout << "euclidean_distance time: " << float(euclidean_distance_time) / 1000 << "ms\n";
+    std::cout << "error_management time: " << float(error_management_time) / 1000 << "ms\n";
+
     cudaMemcpy(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
 
 }
