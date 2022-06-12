@@ -117,6 +117,7 @@ __global__ void euclidean_distance_gpu_2(double *err,double *pr, double *pr_tmp,
             __syncthreads();
         }
 
+        if(i == 0) (*err)=0;
         if(tid == 0) atomicAdd(err, temp[0]);
 
     }
@@ -220,13 +221,6 @@ void PersonalizedPageRank::reset() {
     dangling_array = &dangling[0];
     pr_array = &pr[0];
     val_array = &val[0];
-    //std::vector<double> pr_tmp;
-    //pr_tmp_array = &pr_tmp[0];
-    /*for(int i=0;i<V;i++{}
-        std::cout << val_array[i] ;
-        std::cout << "THIS IS THE DOG\n";
-
-    }*/
 
 
 
@@ -253,10 +247,12 @@ void PersonalizedPageRank::execute(int iteration) {
     cudaStream_t stream_err[max_iterations];
     cudaStreamCreate(&stream1);
     cudaStreamCreate(&stream2);
+    //cudaStreamCreateWithFlags(&stream_err, cudaStreamNonBlocking);
     for (int i = 0; i < max_iterations; ++i)
-        cudaStreamCreateWithFlags(&stream_err[i], cudaStreamNonBlocking);
+        //cudaStreamCreateWithFlags(&stream_err[i], cudaStreamNonBlocking);
+        cudaStreamCreate(&stream_err[i]);
     for (int i = 0; i < max_iterations; ++i)
-        cudaStreamCreateWithFlags(&stream[i], cudaStreamNonBlocking);
+        cudaStreamCreate(&stream[i]);
 
     //make block size for E
     int threads_per_block = 512;
@@ -283,9 +279,12 @@ void PersonalizedPageRank::execute(int iteration) {
     while (!converged && iter < max_iterations) {
 
         start_tmp = clock_type::now();
+        if(iter > 0) cudaStreamSynchronize(stream[iter-1]);
         cudaMemsetAsync(pr_tmp_gpu, 0, V_size, stream[iter]);
         cudaMemsetAsync(dangling_factor_gpu, 0, sizeof(double), stream[iter]);
-        cudaMemsetAsync(err_gpu, 0, sizeof(double), stream[iter]);
+        //if(iter > 0) cudaStreamSynchronize(stream_err[iter-1]);
+        //cudaMemsetAsync(err_gpu, 0, sizeof(double), stream[iter]);
+        //hello_cuda_gpu<<<1,1,0,stream[iter]>>>(err_gpu);
         end_tmp = clock_type::now();
         auto memset_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
         memset_time += memset_time_tmp;
@@ -325,16 +324,25 @@ void PersonalizedPageRank::execute(int iteration) {
         pr_gpu=pr_tmp_gpu;
         pr_tmp_gpu=temp;
 
-        start_tmp = clock_type::now();
-        cudaMemcpyAsync(&error, err_gpu, sizeof(double), cudaMemcpyDeviceToHost, stream[iter]);
-        converged = std::sqrt(error) <= convergence_threshold;
-        end_tmp = clock_type::now();
-        auto error_management_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-        error_management_time += error_management_time_tmp;
+        if(iter > 0) {
+            start_tmp = clock_type::now();
+            //cudaStreamSynchronize(stream[iter-1]);
+            cudaMemcpyAsync(&error, err_gpu, sizeof(double), cudaMemcpyDeviceToHost, stream_err[iter]);
+            //cudaStreamSynchronize(stream_err[iter]);
+            //printf("%d-iter, error: %.14lf\n", iter, error);
+            if(error != 0)
+                converged = std::sqrt(error) <= convergence_threshold;
+            end_tmp = clock_type::now();
+            auto error_management_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+            error_management_time += error_management_time_tmp;
+            if(converged)
+                break;
+        }
 
         iter++;
     }
 
+    std::cout << "#iter: " << iter << "\n";
     std::cout << "memset time: " << float(memset_time) / 1000 << "ms\n";
     std::cout << "spmv_coo time: " << float(spmv_coo_time) / 1000 << "ms\n";
     std::cout << "dot_product time: " << float(dot_product_time) / 1000 << "ms\n";
@@ -344,7 +352,7 @@ void PersonalizedPageRank::execute(int iteration) {
     std::cout << "error_management time: " << float(error_management_time) / 1000 << "ms\n";
 
     start_tmp = clock_type::now();
-    cudaMemcpy(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost, stream[iter]);
     end_tmp = clock_type::now();
     auto copy_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
     copy_time += copy_time_tmp;
