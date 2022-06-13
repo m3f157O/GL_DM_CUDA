@@ -72,6 +72,30 @@ __global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int *V, doubl
 
 }
 
+__global__ void dot_product_gpu_2(int *dangling, double *pr, int *V, double *dangling_factor) {
+
+    int tid = threadIdx.x;
+    int i = tid+blockIdx.x*blockDim.x;
+
+    if(i<(*V)) {
+        __shared__ double temp[64];
+        temp[tid] = dangling[i] * pr[i];
+        __syncthreads();
+        for(unsigned int s = 1; s < blockDim.x; s *= 2) {
+            int index = 2 * s * tid;
+            if (index < blockDim.x) {
+                temp[index] += temp[index + s];
+            }
+        }
+
+        if(i == 0) (*dangling_factor)=0;
+        if(tid == 0) atomicAdd(dangling_factor, temp[0]);
+
+    }
+}
+
+
+
 __global__ void calculateBeta(double *beta, double *dangling, double alpha, int *V) {
 
     (*beta) = (*dangling) * alpha / (*V);
@@ -285,7 +309,7 @@ void PersonalizedPageRank::execute(int iteration) {
         }
 
         if (debug) start_tmp = clock_type::now();
-        dot_product_gpu<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(dangling_gpu, pr_gpu, V_gpu, dangling_factor_gpu);
+        dot_product_gpu_2<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(dangling_gpu, pr_gpu, V_gpu, dangling_factor_gpu);
         if (debug) {
             end_tmp = clock_type::now();
             auto dot_product_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
