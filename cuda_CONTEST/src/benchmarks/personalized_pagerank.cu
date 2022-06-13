@@ -49,14 +49,32 @@ using clock_type = chrono::high_resolution_clock;
 __global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int E, int *V) {
 
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
-    if(thread_id < (*V)) {
+    for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
         pr_tmp_gpu[thread_id] = 0;
     }
     __syncthreads();
     for(int i=thread_id;i<E;i+=blockDim.x*gridDim.x) {
         atomicAdd(&pr_tmp_gpu[x_gpu[i]], val_gpu[i] * pr_gpu[y_gpu[i]]);
     }
+}
 
+__global__ void spmv_coo_gpu_2(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int E, int *V) {
+
+    int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
+    for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
+        pr_tmp_gpu[thread_id] = 0;
+    }
+    __syncthreads();
+    int tid = threadIdx.x;
+    int i = tid+blockIdx.x*blockDim.x;
+    if(i<E) {
+        __shared__ double temp[512];
+        __shared__ int idx[512];
+        temp[tid] = val_gpu[i] * pr_gpu[y_gpu[i]];
+        idx[tid] = x_gpu[i];
+        __syncthreads();
+        atomicAdd(&pr_tmp_gpu[idx[tid]], temp[tid]);
+    }
 }
 
 __global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int *V, double *dangling_factor_gpu) {
@@ -64,9 +82,7 @@ __global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int *V, doubl
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
     if(thread_id == 0) (*dangling_factor_gpu)=0;
     for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
-
         atomicAdd(dangling_factor_gpu, dangling_gpu[i] * pr_gpu[i]);
-
     }
 
 
@@ -77,6 +93,7 @@ __global__ void dot_product_gpu_2(int *dangling, double *pr, int *V, double *dan
     int tid = threadIdx.x;
     int i = tid+blockIdx.x*blockDim.x;
 
+    if(i == 0) (*dangling_factor)=0;
     if(i<(*V)) {
         __shared__ double temp[64];
         temp[tid] = dangling[i] * pr[i];
@@ -88,9 +105,7 @@ __global__ void dot_product_gpu_2(int *dangling, double *pr, int *V, double *dan
             }
         }
 
-        if(i == 0) (*dangling_factor)=0;
         if(tid == 0) atomicAdd(dangling_factor, temp[0]);
-
     }
 }
 
@@ -111,11 +126,11 @@ __global__ void initKernel(double *pr_gpu, int len){
 
 }
 
-__global__ void axbp_custom(double alpha, double one_minus_a, double* pr_tmp, double *beta, int personalization_vertex, double* pr_tmp_result, int *V) {
+__global__ void axbp_custom(double alpha, double* pr_tmp, double *beta, int personalization_vertex, double* pr_tmp_result, int *V) {
 
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
     for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
-        pr_tmp_result[i]=alpha * pr_tmp[i] + (*beta) + ((personalization_vertex == i) ? one_minus_a : 0.0);
+        pr_tmp_result[i]=alpha * pr_tmp[i] + (*beta) + ((personalization_vertex == i) ? (1-alpha) : 0.0);
 
     }
 
@@ -134,6 +149,8 @@ __global__ void euclidean_distance_gpu_2(double *err,double *pr, double *pr_tmp,
 
     int tid = threadIdx.x;
     int i = tid+blockIdx.x*blockDim.x;
+
+    if(i == 0) (*err)=0;
     if(i<(*V)) {
         __shared__ double temp[64];
         temp[tid] = (pr[i] - pr_tmp[i]) * (pr[i] - pr_tmp[i]);
@@ -145,9 +162,7 @@ __global__ void euclidean_distance_gpu_2(double *err,double *pr, double *pr_tmp,
             }
         }
 
-        if(i == 0) (*err)=0;
         if(tid == 0) atomicAdd(err, temp[0]);
-
     }
 }
 
@@ -301,7 +316,7 @@ void PersonalizedPageRank::execute(int iteration) {
         }
 
         if (debug) start_tmp = clock_type::now();
-        spmv_coo_gpu<<<num_blocks,threads_per_block,0,stream[iter]>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, E, V_gpu);
+        spmv_coo_gpu_2<<<num_blocks,threads_per_block,0,stream[iter]>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, E, V_gpu);
         if (debug) {
             end_tmp = clock_type::now();
             auto spmv_coo_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
@@ -325,7 +340,7 @@ void PersonalizedPageRank::execute(int iteration) {
         }
 
         if (debug) start_tmp = clock_type::now();
-        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(alpha, 1-alpha, pr_tmp_gpu, beta_gpu, personalization_vertex, pr_tmp_gpu, V_gpu);
+        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(alpha, pr_tmp_gpu, beta_gpu, personalization_vertex, pr_tmp_gpu, V_gpu);
         if (debug) {
             end_tmp = clock_type::now();
             auto axbp_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
