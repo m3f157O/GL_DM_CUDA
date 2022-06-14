@@ -109,8 +109,6 @@ __global__ void dot_product_gpu_2(int *dangling, double *pr, int *V, double *dan
     }
 }
 
-
-
 __global__ void calculateBeta(double *beta, double *dangling, double alpha, int *V) {
 
     (*beta) = (*dangling) * alpha / (*V);
@@ -241,6 +239,9 @@ void PersonalizedPageRank::alloc() {
     cudaMalloc((void **)&err_gpu, sizeof(double));
     cudaMalloc((void **)&beta_gpu, sizeof(double));
     cudaMalloc((void **)&V_gpu, sizeof(int));
+
+    cudaMallocHost((void **)&error, sizeof(double));
+    cudaMallocHost((void **)&pr_transfer, V_size);
 }
 
 // Initialize data;
@@ -279,10 +280,6 @@ void PersonalizedPageRank::execute(int iteration) {
     // Do the GPU computation here, and also transfer results to the CPU;
 
     max_iterations = 100;
-    convergence_threshold = 1e-6;
-
-    cudaStream_t stream[max_iterations];
-    cudaStream_t stream_err[max_iterations];
 
     //make block size for E
     int threads_per_block = 512;
@@ -303,20 +300,10 @@ void PersonalizedPageRank::execute(int iteration) {
     long euclidean_distance_time = 0;
     long error_management_time = 0;
     long beta_time = 0;
-    long sync_time = 0;
     while (!converged && iter < max_iterations) {
 
         if (debug) start_tmp = clock_type::now();
-        if(iter > 0) cudaStreamSynchronize(stream[iter-1]);
-        cudaStreamCreate(&stream[iter]);
-        if (debug) {
-            end_tmp = clock_type::now();
-            auto sync_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-            sync_time += sync_time_tmp;
-        }
-
-        if (debug) start_tmp = clock_type::now();
-        spmv_coo_gpu_2<<<num_blocks,threads_per_block,0,stream[iter]>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, E, V_gpu);
+        spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, E, V_gpu);
         if (debug) {
             end_tmp = clock_type::now();
             auto spmv_coo_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
@@ -324,7 +311,7 @@ void PersonalizedPageRank::execute(int iteration) {
         }
 
         if (debug) start_tmp = clock_type::now();
-        dot_product_gpu_2<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(dangling_gpu, pr_gpu, V_gpu, dangling_factor_gpu);
+        dot_product_gpu_2<<<num_blocks_vertex,threads_per_block_vertex>>>(dangling_gpu, pr_gpu, V_gpu, dangling_factor_gpu);
         if (debug) {
             end_tmp = clock_type::now();
             auto dot_product_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
@@ -332,7 +319,7 @@ void PersonalizedPageRank::execute(int iteration) {
         }
 
         if (debug) start_tmp = clock_type::now();
-        calculateBeta<<<1,1,0,stream[iter]>>>(beta_gpu, dangling_factor_gpu, alpha, V_gpu);
+        calculateBeta<<<1,1>>>(beta_gpu, dangling_factor_gpu, alpha, V_gpu);
         if (debug) {
             end_tmp = clock_type::now();
             auto beta_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
@@ -340,7 +327,7 @@ void PersonalizedPageRank::execute(int iteration) {
         }
 
         if (debug) start_tmp = clock_type::now();
-        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(alpha, pr_tmp_gpu, beta_gpu, personalization_vertex, pr_tmp_gpu, V_gpu);
+        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, pr_tmp_gpu, beta_gpu, personalization_vertex, pr_tmp_gpu, V_gpu);
         if (debug) {
             end_tmp = clock_type::now();
             auto axbp_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
@@ -348,23 +335,20 @@ void PersonalizedPageRank::execute(int iteration) {
         }
 
         if (debug) start_tmp = clock_type::now();
-        euclidean_distance_gpu_2<<<num_blocks_vertex,threads_per_block_vertex,0,stream[iter]>>>(err_gpu, pr_gpu, pr_tmp_gpu, V_gpu);
+        euclidean_distance_gpu_2<<<num_blocks_vertex,threads_per_block_vertex>>>(err_gpu, pr_gpu, pr_tmp_gpu, V_gpu);
         if (debug) {
             end_tmp = clock_type::now();
             auto euclidean_distance_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
             euclidean_distance_time += euclidean_distance_time_tmp;
         }
 
-        if(iter > 0) {
-            if (debug) start_tmp = clock_type::now();
-            cudaStreamCreate(&stream_err[iter]);
-            cudaMemcpyAsync(&error, err_gpu, sizeof(double), cudaMemcpyDeviceToHost, stream_err[iter]);
-            if(error != 0) converged = std::sqrt(error) <= convergence_threshold;
-            if (debug) {
-                end_tmp = clock_type::now();
-                auto error_management_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-                error_management_time += error_management_time_tmp;
-            }
+        if (debug) start_tmp = clock_type::now();
+        cudaMemcpy(error, err_gpu, sizeof(double), cudaMemcpyDeviceToHost);
+        converged = std::sqrt(*error) <= convergence_threshold;
+        if (debug) {
+            end_tmp = clock_type::now();
+            auto error_management_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+            error_management_time += error_management_time_tmp;
         }
 
         // Update the PageRank vector;
@@ -376,12 +360,12 @@ void PersonalizedPageRank::execute(int iteration) {
     }
 
     if (debug) start_tmp = clock_type::now();
-    cudaMemcpyAsync(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost, stream[iter-1]);
+    cudaMemcpy(pr_transfer, pr_gpu, V_size, cudaMemcpyDeviceToHost);
+    memcpy(pr_array, pr_transfer, V_size);
     if (debug) {
         end_tmp = clock_type::now();
         auto copy_time = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
         std::cout << "#iter: " << iter << "\n";
-        std::cout << "sync time: " << float(sync_time) / 1000 << "ms\n";
         std::cout << "spmv_coo time: " << float(spmv_coo_time) / 1000 << "ms\n";
         std::cout << "dot_product time: " << float(dot_product_time) / 1000 << "ms\n";
         std::cout << "beta time: " << float(beta_time) / 1000 << "ms\n";

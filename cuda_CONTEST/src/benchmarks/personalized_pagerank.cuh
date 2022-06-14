@@ -165,10 +165,10 @@ class PersonalizedPageRank : public Benchmark {
     int *x_gpu, *y_gpu;
     int *V_gpu, *E_gpu;
     double *val_gpu, *pr_gpu;
-    double error;
+    double *error;
     // Temporary arrays
     double *dangling_factor_gpu, *err_gpu, *beta_gpu;
-    double *pr_tmp_gpu;
+    double *pr_tmp_gpu, *pr_transfer;
     int *dangling_gpu;
     int V_size;
     int E_size;
