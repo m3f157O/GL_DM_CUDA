@@ -164,10 +164,13 @@ class PersonalizedPageRank : public Benchmark {
     // Pointers for VRAM data
     int *x_gpu, *y_gpu;
     int *V_gpu, *E_gpu;
+    int *dangling_gpu;
     double *val_gpu, *pr_gpu;
+
+    double *alpha_gpu;
+    int *personalization_vertex_gpu;
     // Temporary arrays
     double *pr_tmp_gpu;
-    int *dangling_gpu;
     int V_size;
     int E_size;
     int dangling_size;

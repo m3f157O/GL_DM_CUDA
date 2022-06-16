@@ -46,19 +46,19 @@ using clock_type = chrono::high_resolution_clock;
 //////////////////////////////
 //////////////////////////////
 
-__global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int E, int *V) {
+__global__ void spmv_coo_gpu(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int *E, int *V) {
 
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
     for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
         pr_tmp_gpu[thread_id] = 0;
     }
     __syncthreads();
-    for(int i=thread_id;i<E;i+=blockDim.x*gridDim.x) {
+    for(int i=thread_id;i<(*E);i+=blockDim.x*gridDim.x) {
         atomicAdd(&pr_tmp_gpu[x_gpu[i]], val_gpu[i] * pr_gpu[y_gpu[i]]);
     }
 }
 
-__global__ void spmv_coo_gpu_2(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int E, int *V) {
+__global__ void spmv_coo_gpu_2(const int *x_gpu, const int *y_gpu, const double *val_gpu, const double *pr_gpu, double *pr_tmp_gpu, int *E, int *V) {
 
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
     for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
@@ -67,7 +67,7 @@ __global__ void spmv_coo_gpu_2(const int *x_gpu, const int *y_gpu, const double 
     __syncthreads();
     int tid = threadIdx.x;
     int i = tid+blockIdx.x*blockDim.x;
-    if(i<E) {
+    if(i<(*E)) {
         __shared__ double temp[512];
         __shared__ int idx[512];
         temp[tid] = val_gpu[i] * pr_gpu[y_gpu[i]];
@@ -124,11 +124,11 @@ __global__ void initKernel(double *pr_gpu, int len){
 
 }
 
-__global__ void axbp_custom(double alpha, double* pr_tmp, double *beta, int personalization_vertex, double* pr_tmp_result, int *V) {
+__global__ void axbp_custom(double *alpha, double* pr_tmp, double *beta, int *personalization_vertex, double* pr_tmp_result, int *V) {
 
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
     for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
-        pr_tmp_result[i]=alpha * pr_tmp[i] + (*beta) + ((personalization_vertex == i) ? (1-alpha) : 0.0);
+        pr_tmp_result[i]=(*alpha) * pr_tmp[i] + (*beta) + ((*personalization_vertex == i) ? (1-(*alpha)) : 0.0);
 
     }
 
@@ -171,11 +171,11 @@ __global__ void check_convergence(double *err, bool *converged, double convergen
 __device__ double dangling_factor;
 __device__ double beta;
 __device__ double error;
-__global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_tmp, int *dangling, double alpha, int personalization_vertex, int max_iterations, double convergence_threshold, int E, int *V, bool debug) {
+__global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_tmp, int *dangling, double *alpha, int *personalization_vertex, int max_iterations, double convergence_threshold, int *E, int *V/*, bool debug*/) {
 
     //make block size for E
     int threads_per_block = 512;
-    int num_blocks = (E + threads_per_block - 1)/ threads_per_block;
+    int num_blocks = ((*E) + threads_per_block - 1)/ threads_per_block;
 
     //make block size for V
     int threads_per_block_vertex = 64;
@@ -188,15 +188,13 @@ __global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_
     while (!converged && iter < max_iterations) {
 
         spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x, y, val, pr, pr_tmp, E, V);
-        cudaDeviceSynchronize();
 
         dot_product_gpu_2<<<num_blocks_vertex,threads_per_block_vertex>>>(dangling, pr, V, &dangling_factor);
         cudaDeviceSynchronize();
 
-        beta = dangling_factor * alpha / (*V);
+        beta = dangling_factor * (*alpha) / (*V);
 
         axbp_custom<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, pr_tmp, &beta, personalization_vertex, pr_tmp, V);
-        cudaDeviceSynchronize();
 
         euclidean_distance_gpu_2<<<num_blocks_vertex,threads_per_block_vertex>>>(&error, pr, pr_tmp, V);
         cudaDeviceSynchronize();
@@ -210,7 +208,7 @@ __global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_
 
         iter++;
     }
-    if(debug) printf("#iter: %d\n", iter);
+    //if(debug) printf("#iter: %d\n", iter);
 }
 
 // CPU Utility functions;
@@ -285,6 +283,9 @@ void PersonalizedPageRank::alloc() {
     cudaMalloc((void **)&pr_tmp_gpu, V_size);
     cudaMalloc((void **)&dangling_gpu, dangling_size);
     cudaMalloc((void **)&V_gpu, sizeof(int));
+    cudaMalloc((void **)&alpha_gpu, sizeof(double));
+    cudaMalloc((void **)&personalization_vertex_gpu, sizeof(int));
+    cudaMalloc((void **)&E_gpu, sizeof(int));
 }
 
 // Initialize data;
@@ -315,19 +316,19 @@ void PersonalizedPageRank::reset() {
     cudaMemcpy(x_gpu, x_array, E_size, cudaMemcpyHostToDevice);
     cudaMemcpy(V_gpu, &V, sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(dangling_gpu, dangling_array, dangling_size, cudaMemcpyHostToDevice);
-
+    cudaMemcpy(alpha_gpu, &alpha, sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(personalization_vertex_gpu, &personalization_vertex, sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(E_gpu, &E, sizeof(int), cudaMemcpyHostToDevice);
 }
 
 void PersonalizedPageRank::execute(int iteration) {
 
     // Do the GPU computation here, and also transfer results to the CPU;
 
-    //cudaStream_t stream;
-    //cudaStreamCreate(&stream);
     auto start_tmp = clock_type::now();
 
     if (debug) start_tmp = clock_type::now();
-    main_kernel<<<1,1>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, dangling_gpu, alpha, personalization_vertex, max_iterations, convergence_threshold, E, V_gpu, debug);
+    main_kernel<<<1,1>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, dangling_gpu, alpha_gpu, personalization_vertex_gpu, max_iterations, convergence_threshold, E_gpu, V_gpu/*, debug*/);
     if (debug) {
         auto end_tmp = clock_type::now();
         auto main_kernel_time = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
@@ -335,7 +336,7 @@ void PersonalizedPageRank::execute(int iteration) {
     }
 
     if (debug) start_tmp = clock_type::now();
-    cudaMemcpy(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
+    cudaMemcpyAsync(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
     if (debug) {
         auto end_tmp = clock_type::now();
         auto copy_time = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
@@ -420,4 +421,7 @@ void PersonalizedPageRank::clean() {
     cudaFree(pr_tmp_gpu);
     cudaFree(dangling_gpu);
     cudaFree(V_gpu);
+    cudaFree(alpha_gpu);
+    cudaFree(personalization_vertex_gpu);
+    cudaFree(E_gpu);
 }
