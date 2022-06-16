@@ -54,7 +54,7 @@
 #define DEFAULT_GRAPH "data/California.mtx"
 // #define DEFAULT_GRAPH "data/wikipedia-20070206.mtx"
 #define DEFAULT_ALPHA 0.85
-#define DEFAULT_MAX_ITER 30
+#define DEFAULT_MAX_ITER 100
 #define DEFAULT_CONVERGENCE 1e-6
 
 //////////////////////////////

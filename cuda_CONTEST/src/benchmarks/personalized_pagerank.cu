@@ -109,9 +109,9 @@ __global__ void dot_product_gpu_2(int *dangling, double *pr, int *V, double *dan
     }
 }
 
-__global__ void calculateBeta(double *beta, double *dangling, double alpha, int *V) {
+__global__ void calculateBeta(double *beta, double *dangling_factor, double alpha, int *V) {
 
-    (*beta) = (*dangling) * alpha / (*V);
+    (*beta) = (*dangling_factor) * alpha / (*V);
 }
 
 __global__ void initKernel(double *pr_gpu, int len){
@@ -143,7 +143,7 @@ __global__ void euclidean_distance_gpu(double *err,double *pr, double *pr_tmp, i
 
 }
 
-__global__ void euclidean_distance_gpu_2(double *err,double *pr, double *pr_tmp, int *V) {
+__global__ void euclidean_distance_gpu_2(double *err, double *pr, double *pr_tmp, int *V) {
 
     int tid = threadIdx.x;
     int i = tid+blockIdx.x*blockDim.x;
@@ -162,6 +162,55 @@ __global__ void euclidean_distance_gpu_2(double *err,double *pr, double *pr_tmp,
 
         if(tid == 0) atomicAdd(err, temp[0]);
     }
+}
+
+__global__ void check_convergence(double *err, bool *converged, double convergence_threshold) {
+    (*converged) = (std::sqrt(*err) <= convergence_threshold);
+}
+
+__device__ double dangling_factor;
+__device__ double beta;
+__device__ double error;
+__global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_tmp, int *dangling, double alpha, int personalization_vertex, int max_iterations, double convergence_threshold, int E, int *V, bool debug) {
+
+    //make block size for E
+    int threads_per_block = 512;
+    int num_blocks = (E + threads_per_block - 1)/ threads_per_block;
+
+    //make block size for V
+    int threads_per_block_vertex = 64;
+    int num_blocks_vertex = ((*V) + threads_per_block_vertex - 1)/ threads_per_block_vertex;
+
+    int iter = 0;
+    bool converged = false;
+    double *temp;
+
+    while (!converged && iter < max_iterations) {
+
+        spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x, y, val, pr, pr_tmp, E, V);
+        cudaDeviceSynchronize();
+
+        dot_product_gpu_2<<<num_blocks_vertex,threads_per_block_vertex>>>(dangling, pr, V, &dangling_factor);
+        cudaDeviceSynchronize();
+
+        beta = dangling_factor * alpha / (*V);
+
+        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, pr_tmp, &beta, personalization_vertex, pr_tmp, V);
+        cudaDeviceSynchronize();
+
+        euclidean_distance_gpu_2<<<num_blocks_vertex,threads_per_block_vertex>>>(&error, pr, pr_tmp, V);
+        cudaDeviceSynchronize();
+
+        converged = sqrt(error) <= convergence_threshold;
+
+        // Update the PageRank vector;
+        temp=pr;
+        pr=pr_tmp;
+        pr_tmp=temp;
+
+        iter++;
+    }
+    if(debug) printf("#iter: %d\n", iter);
 }
 
 // CPU Utility functions;
@@ -222,7 +271,7 @@ void PersonalizedPageRank::alloc() {
 
     // Size of allocations
     V_size = V * sizeof(double);
-    dangling_size = V * sizeof(int); //ok
+    dangling_size = V * sizeof(int);
     E_size = E * sizeof(int);
     val_size = E * sizeof(double);
 
@@ -235,13 +284,7 @@ void PersonalizedPageRank::alloc() {
     cudaMalloc((void **)&pr_gpu, V_size);
     cudaMalloc((void **)&pr_tmp_gpu, V_size);
     cudaMalloc((void **)&dangling_gpu, dangling_size);
-    cudaMalloc((void **)&dangling_factor_gpu, sizeof(double));
-    cudaMalloc((void **)&err_gpu, sizeof(double));
-    cudaMalloc((void **)&beta_gpu, sizeof(double));
     cudaMalloc((void **)&V_gpu, sizeof(int));
-
-    cudaMallocHost((void **)&error, sizeof(double));
-    cudaMallocHost((void **)&pr_transfer, V_size);
 }
 
 // Initialize data;
@@ -254,11 +297,10 @@ void PersonalizedPageRank::init() {
 // Reset the result, and transfer data to the GPU if necessary;
 void PersonalizedPageRank::reset() {
     // Reset the PageRank vector (uniform initialization, 1 / V for each vertex);
-    //std::fill(pr.begin(), pr.end(), 1.0 / V);
+    std::fill(pr.begin(), pr.end(), 1.0 / V);
     // Generate a new personalization vertex for this iteration;
     personalization_vertex = rand() % V;
     if (debug) std::cout << "personalization vertex=" << personalization_vertex << std::endl;
-    //std::cout << "RESET";
 
     x_array = &x[0];
     y_array = &y[0];
@@ -277,101 +319,26 @@ void PersonalizedPageRank::reset() {
 }
 
 void PersonalizedPageRank::execute(int iteration) {
+
     // Do the GPU computation here, and also transfer results to the CPU;
 
-    max_iterations = 100;
-
-    //make block size for E
-    int threads_per_block = 512;
-    int num_blocks = (E + threads_per_block - 1)/ threads_per_block;
-
-    //make block size for V
-    int threads_per_block_vertex = 64;
-    int num_blocks_vertex = (V + threads_per_block_vertex - 1)/ threads_per_block_vertex;
-
-    double *temp;
-    int iter = 0;
-    bool converged = false;
+    //cudaStream_t stream;
+    //cudaStreamCreate(&stream);
     auto start_tmp = clock_type::now();
-    auto end_tmp = clock_type::now();
-    long spmv_coo_time = 0;
-    long dot_product_time = 0;
-    long axbp_time = 0;
-    long euclidean_distance_time = 0;
-    long error_management_time = 0;
-    long beta_time = 0;
-    while (!converged && iter < max_iterations) {
 
-        if (debug) start_tmp = clock_type::now();
-        spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, E, V_gpu);
-        if (debug) {
-            end_tmp = clock_type::now();
-            auto spmv_coo_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-            spmv_coo_time += spmv_coo_time_tmp;
-        }
-
-        if (debug) start_tmp = clock_type::now();
-        dot_product_gpu_2<<<num_blocks_vertex,threads_per_block_vertex>>>(dangling_gpu, pr_gpu, V_gpu, dangling_factor_gpu);
-        if (debug) {
-            end_tmp = clock_type::now();
-            auto dot_product_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-            dot_product_time += dot_product_time_tmp;
-        }
-
-        if (debug) start_tmp = clock_type::now();
-        calculateBeta<<<1,1>>>(beta_gpu, dangling_factor_gpu, alpha, V_gpu);
-        if (debug) {
-            end_tmp = clock_type::now();
-            auto beta_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-            beta_time += beta_time_tmp;
-        }
-
-        if (debug) start_tmp = clock_type::now();
-        axbp_custom<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, pr_tmp_gpu, beta_gpu, personalization_vertex, pr_tmp_gpu, V_gpu);
-        if (debug) {
-            end_tmp = clock_type::now();
-            auto axbp_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-            axbp_time += axbp_time_tmp;
-        }
-
-        if (debug) start_tmp = clock_type::now();
-        euclidean_distance_gpu_2<<<num_blocks_vertex,threads_per_block_vertex>>>(err_gpu, pr_gpu, pr_tmp_gpu, V_gpu);
-        if (debug) {
-            end_tmp = clock_type::now();
-            auto euclidean_distance_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-            euclidean_distance_time += euclidean_distance_time_tmp;
-        }
-
-        if (debug) start_tmp = clock_type::now();
-        cudaMemcpy(error, err_gpu, sizeof(double), cudaMemcpyDeviceToHost);
-        converged = std::sqrt(*error) <= convergence_threshold;
-        if (debug) {
-            end_tmp = clock_type::now();
-            auto error_management_time_tmp = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-            error_management_time += error_management_time_tmp;
-        }
-
-        // Update the PageRank vector;
-        temp=pr_gpu;
-        pr_gpu=pr_tmp_gpu;
-        pr_tmp_gpu=temp;
-
-        iter++;
+    if (debug) start_tmp = clock_type::now();
+    main_kernel<<<1,1>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, dangling_gpu, alpha, personalization_vertex, max_iterations, convergence_threshold, E, V_gpu, debug);
+    if (debug) {
+        auto end_tmp = clock_type::now();
+        auto main_kernel_time = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
+        std::cout << "main_kernel time: " << float(main_kernel_time) / 1000 << "ms\n";
     }
 
     if (debug) start_tmp = clock_type::now();
-    cudaMemcpy(pr_transfer, pr_gpu, V_size, cudaMemcpyDeviceToHost);
-    memcpy(pr_array, pr_transfer, V_size);
+    cudaMemcpy(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
     if (debug) {
-        end_tmp = clock_type::now();
+        auto end_tmp = clock_type::now();
         auto copy_time = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-        std::cout << "#iter: " << iter << "\n";
-        std::cout << "spmv_coo time: " << float(spmv_coo_time) / 1000 << "ms\n";
-        std::cout << "dot_product time: " << float(dot_product_time) / 1000 << "ms\n";
-        std::cout << "beta time: " << float(beta_time) / 1000 << "ms\n";
-        std::cout << "axbp time: " << float(axbp_time) / 1000 << "ms\n";
-        std::cout << "euclidean_distance time: " << float(euclidean_distance_time) / 1000 << "ms\n";
-        std::cout << "error_management time: " << float(error_management_time) / 1000 << "ms\n";
         std::cout << "copy time: " << float(copy_time) / 1000 << "ms\n";
     }
 
@@ -452,8 +419,5 @@ void PersonalizedPageRank::clean() {
     cudaFree(pr_gpu);
     cudaFree(pr_tmp_gpu);
     cudaFree(dangling_gpu);
-    cudaFree(dangling_factor_gpu);
-    cudaFree(err_gpu);
-    cudaFree(beta_gpu);
     cudaFree(V_gpu);
 }
