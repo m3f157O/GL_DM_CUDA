@@ -32,14 +32,12 @@
 #include <iterator>
 #include "../benchmark.cuh"
 #include <math.h>
+
 // CPU Utility functions;
 
 inline void spmv_coo_cpu(const int *x, const int *y, const double *val, const double *vec, double *result, int N) {
     for (int i = 0; i < N; i++) {
-        //// the value of each node is the summation of the value of outgoing nodes * the previous pagerank score
         result[x[i]] += val[i] * vec[y[i]];
-        //printf("iteration %d pr temp cpu : %f\n",i,result[x[i]]);
-
     }
 }
 
@@ -53,12 +51,7 @@ inline double dot_product_cpu(const int *a, const double *b, const int N) {
 
 inline void axpb_personalized_cpu( double alpha, double *x, double beta, const int personalization_vertex, double *result, const int N) { double one_minus_alpha = 1 - alpha;
     for (int i = 0; i < N; i++) {
-
-        //// this X is not the usual X
-        ///multiply previous score for probability of passing to next link, result is scaled by percentage
         result[i] = alpha * x[i] + beta + ((personalization_vertex == i) ? one_minus_alpha : 0.0);
-        //printf("iteration %d pr temp cpu : %f\n",i,result[i]);
-
     }
 }
 
@@ -87,20 +80,17 @@ inline void personalized_pagerank_cpu(
     // Temporary PPR result;
     double *pr_tmp = (double *) malloc(sizeof(double) * V);
 
-    int iter = 0;  //stay on cpu
-    bool converged = false; //stay on cpu
-    while (!converged && iter < max_iterations) {     //stay on cpu
-        memset(pr_tmp, 0, sizeof(double) * V);  // ???
-        spmv_coo_cpu(x, y, val, pr, pr_tmp, E); //TODO GPU
-
-        ////get dangling vector percentage
-        double dangling_factor = dot_product_cpu(dangling_bitmap, pr, V); //TODO GPU
-        ////alpha choose next link, pr_tmp, beta is a priori proability (?????) that next chosen is dangling over V
-        axpb_personalized_cpu(alpha, pr_tmp, alpha * dangling_factor / V, personalization_vertex, pr_tmp, V); //TODO GPU
+    int iter = 0;
+    bool converged = false;
+    while (!converged && iter < max_iterations) {
+        memset(pr_tmp, 0, sizeof(double) * V);
+        spmv_coo_cpu(x, y, val, pr, pr_tmp, E);
+        double dangling_factor = dot_product_cpu(dangling_bitmap, pr, V);
+        axpb_personalized_cpu(alpha, pr_tmp, alpha * dangling_factor / V, personalization_vertex, pr_tmp, V);
 
         // Check convergence;
-        double err = euclidean_distance_cpu(pr, pr_tmp, V); //TODO GPU
-        converged = err <= convergence_threshold; // ????
+        double err = euclidean_distance_cpu(pr, pr_tmp, V);
+        converged = err <= convergence_threshold;
 
         // Update the PageRank vector;
         memcpy(pr, pr_tmp, sizeof(double) * V);
@@ -156,21 +146,13 @@ class PersonalizedPageRank : public Benchmark {
     double precision = 0;     // How many top-20 vertices are correctly retrieved;
     std::string graph_file_path = DEFAULT_GRAPH;
 
-    //GPU STUFF
-    int* x_array;
-    int* y_array;
-    int* dangling_array;
+    // GPU STUFF
+    int *x_array, *y_array, *dangling_array;
     double *pr_array, *val_array, *pr_tmp_array;
     // Pointers for VRAM data
-    int *x_gpu, *y_gpu;
-    int *V_gpu, *E_gpu;
-    int *dangling_gpu;
-    double *val_gpu, *pr_gpu;
-
-    double *alpha_gpu;
-    int *personalization_vertex_gpu;
-    // Temporary arrays
-    double *pr_tmp_gpu;
+    int *x_gpu, *y_gpu, *dangling_gpu, *V_gpu, *E_gpu, *personalization_vertex_gpu;
+    double *val_gpu, *pr_gpu, *alpha_gpu, *pr_tmp_gpu;
+    // Array sizes
     int V_size;
     int E_size;
     int dangling_size;
