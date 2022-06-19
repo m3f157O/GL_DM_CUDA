@@ -33,13 +33,19 @@ Set memory in kernels (instead of using memset we assign value with loop in kern
 Now we decide to proceed to profiling, and we notice that for smaller datasets the speedup is <1 for GPU w.r.t. CPU
 
 ### First profiling 
-On California dataset, nvprof shows that speedup w.r.t. first version is pretty good, and we notice the current  bottlenecks are spmv coo and dot product
-(picture)
+On California dataset, setup with 100 iterations, nvprof shows that speedup w.r.t. first version is pretty good, and we notice the current bottlenecks are spmv coo and dot product. We decide to do a profilation on a bigger dataset and for a longer time
+
+![cali1k](data/cali1k.jpg)
 
 ### Second profiling
-After verifying the effectiveness of the first profiling, we proceed on the Wiki dataset, and nvprof shows that speedup is significant for large datasets, and that dot_product_gpu is not working well as we tought, so we proceed to reduce it
+After verifying the effectiveness of the first optimization, we proceed on the Wiki dataset, and nvprof shows that speedup is significant for large datasets, and that dot_product_gpu is not working well as we tought, so we proceed to reduce it
 
-(pictures)
+Before dot product optimization
+![wiki1k](data/wiki before dot.jpg)
+
+
+After dot product optimization
+![wiki1k](data/wiki1k.jpg)
 
 
 
@@ -47,6 +53,7 @@ After verifying the effectiveness of the first profiling, we proceed on the Wiki
 ### Third Profiling
 We expected spmv coo to be the remaining bottleneck, so we proceed for another reduction, improving spmv by a little
 
+![wiki1k](data/wiki after dot.jpg)
 ### Profilings conclusions
 After noticing that the only remaining bottleneck was the locking memcpy (loop is done in the cpu), we decide to aggregate the kernels as much as possible, and to use a main kernel doing the loop in the gpu and calling all the subkernels. This increases the speedup on large datasets such as wiki of 20% w.r.t. to CPU. At last we decided to try cublas libraries instead of our functions, to compare them.
 
@@ -82,4 +89,4 @@ Stanford is a directed graph, based on highways and roads, while Flickr is an in
 
 Here is a visualization :
 (graph pic)
-![Happy Christmas](data/cali1k.jpg)
+
