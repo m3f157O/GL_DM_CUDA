@@ -30,7 +30,7 @@
 # Use NVCC.
 # Set the appropriate GPU architecture, check https://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/
 CXX=nvcc
-FLAGS = -O2 -std=c++11 -arch=sm_75 -lcublas
+FLAGS =-O3 -std=c++11 -arch=native -lcublas -rdc=true -lcudadevrt -D__CDPRT_SUPPRESS_SYNC_DEPRECATION_WARNING
 
 BIN_FOLDER=bin
 SRC_FOLDER=src

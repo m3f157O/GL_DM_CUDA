@@ -82,8 +82,11 @@ void Benchmark::run() {
             std::cout << "  GPU execution(" << i << ")=" << float(exec_time) / 1000 << " ms" << std::endl;
             std::cout << "  GPU result=" << print_result() << std::endl;
             if (do_cpu_validation) cpu_validation(i);
-        } else {
+        } else if (do_cpu_validation){
+            if (do_cpu_validation) cpu_validation(i);
             std::cout << i << "," << print_result(true) << "," << float(reset_time + exec_time) / 1e6 << "," << float(reset_time) / 1e6 << "," << float(exec_time) / 1e6 << std::endl;
+        } else {
+            std::cout << i << "," << "not validated by cpu" << "," << float(reset_time + exec_time) / 1e6 << "," << float(reset_time) / 1e6 << "," << float(exec_time) / 1e6 << std::endl;
         }
     }
 

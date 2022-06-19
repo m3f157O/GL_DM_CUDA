@@ -145,6 +145,7 @@ class PersonalizedPageRank : public Benchmark {
     int topk_vertices = 20;   // Number of highest-ranked vertices to look for;
     double precision = 0;     // How many top-20 vertices are correctly retrieved;
     std::string graph_file_path = DEFAULT_GRAPH;
+    double precision_to_print = 0;
 
     // GPU STUFF
     int *x_array, *y_array, *dangling_array;

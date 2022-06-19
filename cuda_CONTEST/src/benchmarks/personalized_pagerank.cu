@@ -398,7 +398,7 @@ void PersonalizedPageRank::execute(int iteration) {
         cublasDestroy(handle);
     }
 
-    cudaMemcpyAsync(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
 }
 
 void PersonalizedPageRank::cpu_validation(int iter) {
@@ -416,7 +416,7 @@ void PersonalizedPageRank::cpu_validation(int iter) {
     personalized_pagerank_cpu(x.data(), y.data(), val.data(), V, E, pr_golden.data(), dangling.data(), personalization_vertex, alpha, convergence_threshold, max_iterations);
     auto end_tmp = clock_type::now();
     auto exec_time = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
-    std::cout << "exec time CPU=" << double(exec_time) / 1000 << " ms" << std::endl;
+    if(debug) std::cout << "exec time CPU=" << double(exec_time) / 1000 << " ms" << std::endl;
 
     // Obtain the vertices with highest PPR value;
     std::vector<std::pair<int, double>> sorted_pr_tuples = sort_pr(pr.data(), V);
@@ -443,6 +443,7 @@ void PersonalizedPageRank::cpu_validation(int iter) {
             }
         }
     }
+    precision_to_print = precision;
     std::cout.precision(old_precision);
     // Set intersection to find correctly retrieved vertices;
     std::vector<int> correctly_retrieved_vertices;
@@ -453,7 +454,7 @@ void PersonalizedPageRank::cpu_validation(int iter) {
 
 std::string PersonalizedPageRank::print_result(bool short_form) {
     if (short_form) {
-        return std::to_string(precision);
+        return std::to_string(precision_to_print);
     } else {
         // Print the first few PageRank values (not sorted);
         std::ostringstream out;
