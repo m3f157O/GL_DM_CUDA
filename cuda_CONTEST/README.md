@@ -90,5 +90,4 @@ The following values are roundings in milliseconds of the execution times of the
 Stanford is a directed graph, based on highways and roads, while Flickr is an index of the website, they are 10k and 100k in size.
 
 Here is a visualization :
-(graph pic)
-
+![graph](graph.jpg)
