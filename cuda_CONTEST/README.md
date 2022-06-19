@@ -35,7 +35,7 @@ Now we decide to proceed to profiling, and we notice that for smaller datasets t
 ### First profiling 
 On California dataset, setup with 100 iterations, nvprof shows that speedup w.r.t. first version is pretty good, and we notice the current bottlenecks are spmv coo and dot product. We decide to do a profilation on a bigger dataset and for a longer time
 
-![cali 1k](data/cali 1k.jpg)
+![cali1k](data/cali1k.jpg)
 
 ### Second profiling
 After verifying the effectiveness of the first optimization, we proceed on the Wiki dataset, and nvprof shows that speedup is significant for large datasets, and that dot_product_gpu is not working well as we tought, so we proceed to reduce it
