@@ -121,25 +121,32 @@ Not being well tailored for our context, the small tweaks that we have to do to 
 
 ## Results
 
-We decided to add two more datasets to see the speedup relative to the cpu  (Last generation Intel core i7)
+We decided to add two more datasets (Stanford and Flickr) to see the speedup relative to the cpu  (Last generation Intel core i7)
 
 We noticed that the speedup increases as exponentially w.r.t. the size of the dataset.
 
 The following values are roundings in milliseconds of the execution times of the implementation at a given time (Rows) on a certain dataset(Columns)
 
-| X          | 08/06 | 12/06 | 13/06 | 13/06 | 14/06 | 16/06 |
-|------------|-------|-------|-------|-------|-------|-------|
-| small      | 2     | 2     | 1     | 1     | 1     | 2     |
-| Stanford   | 15    | 15    | 14    | 12    | 6     | 9     |
-| California | 11    | 7     | 6     | 6     | 3     | 7     |
-| Flickr     | 241   | 216   | 158   | 156   | 145   | 141   |
-| Wiki       | 1348  | 1311  | 1157  | 1030  | 1117  | 1087  |
+| X          | 08/06 | 12/06 | 13/06 | 13/06 | 14/06 | 16/06 | cuBLAS |
+|------------|-------|-------|-------|-------|-------|-------|--------|
+| small      | 2     | 2     | 1     | 1     | 1     | 1     |   2    |
+| Stanford   | 15    | 15    | 14    | 12    | 6     | 5     |   10   |
+| California | 11    | 7     | 6     | 6     | 3     | 2     |   7    |
+| Flickr     | 241   | 216   | 158   | 156   | 145   | 141   |   168  |
+| Wiki       | 1348  | 1311  | 1157  | 1030  | 1117  | 1087  |   1289 |
+
+The GPU is an RTX 2060 mobile
 
 Stanford is a directed graph, based on highways and roads, while Flickr is an index of the website, they are 10k and 100k in size.
+
+Until the 14/06 implementation, the precision is ALWAYS 100%, the 16/06 one is way faster and in most cases (>95%) the precision is 100%, but for very lonely nodes it may drop down to 60%. The cuBLAS implementation is very stable but far slower 
+
+
 
 I1, I2, ecc. Refers to the rows of the previous table i.e. I1 is 08/06 codebase, I2 is 12/06 ecc.
 Here is a visualization :
 ![graphs](data/graphs.png)
 
 
-Running the code with -I 1 will run the cuBlas implementation, which is far slower than our custom, but we kept it for confrontation reasons
+
+Running the code with -I 1 will run the cuBlas implementation, which is slower but stabler than our custom, but we kept it for confrontation reasons
