@@ -58,21 +58,21 @@ Then we proceed to optimize the gpu kernels, and then verify the results and dec
 First working implementation: Initial time 43ms
 
 Initial optimizations:
-Copy back pr at end instead of each iteration -4ms  
-Initial thread assignment (64 for Vertex-related loops, 512 for edges related loops) -8 ms
-Remove unnecessary memsets (just useless memsets) -6ms
-Pointer swap instead of memcpy (for pr and pr_temp swap)-4ms
-Parallel reduction on euclidean (not really that necessary) -3ms
+*Copy back pr at end instead of each iteration -4ms  
+*Initial thread assignment (64 for Vertex-related loops, 512 for edges related loops) -8 ms
+*Remove unnecessary memsets (just useless memsets) -6ms
+*Pointer swap instead of memcpy (for pr and pr_temp swap)-4ms
+*Parallel reduction on euclidean (not really that necessary) -3ms
 
 -25 ms so far for trivial optimizations
 
 ## Non-trivial optimizations
 
 Following optimizations:
-Pipeline memcpy (don't let current loop kernels wait for memcpy completion)-6ms
-Stream initial implementation (each loop iteration proceeds on its own) -3ms
-Stream final (error check pipeline, each error is checked while the following loop is already started, tradeoff with sync overhead) -5ms
-Set memory in kernels (instead of using memset we assign value with loop in kernels) -3ms
+*Pipeline memcpy (don't let current loop kernels wait for memcpy completion)-6ms
+*Stream initial implementation (each loop iteration proceeds on its own) -3ms
+*Stream final (error check pipeline, each error is checked while the following loop is already started, tradeoff with sync overhead) -5ms
+*Set memory in kernels (instead of using memset we assign value with loop in kernels) -3ms
 
 -33ms so far for non-trivial optimizations
 
