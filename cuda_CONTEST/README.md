@@ -82,3 +82,4 @@ Stanford is a directed graph, based on highways and roads, while Flickr is an in
 
 Here is a visualization :
 (graph pic)
+![Happy Christmas](data/cali1k.jpg)
