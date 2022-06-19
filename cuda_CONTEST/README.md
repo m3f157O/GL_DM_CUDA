@@ -42,12 +42,12 @@ After verifying the effectiveness of the first optimization, we proceed on the W
 
 Before dot product optimization
 
-![wiki before dot](data/wiki before dot.jpg)
+![wiki-before-dot](data/wiki-before-dot.jpg)
 
 
 After dot product optimization
+![wiki-after-dot](data/wiki-after-dot.jpg)
 
-![wiki 1k](data/wiki 1k.jpg)
 
 
 
@@ -55,7 +55,7 @@ After dot product optimization
 ### Third Profiling
 We expected spmv coo to be the remaining bottleneck, so we proceed for another reduction, improving spmv by a little
 
-![wiki after dot](data/wiki after dot.jpg)
+![wiki-1k](data/wiki-1k.jpg)
 ### Profilings conclusions
 After noticing that the only remaining bottleneck was the locking memcpy (loop is done in the cpu), we decide to aggregate the kernels as much as possible, and to use a main kernel doing the loop in the gpu and calling all the subkernels. This increases the speedup on large datasets such as wiki of 20% w.r.t. to CPU. At last we decided to try cublas libraries instead of our functions, to compare them.
 
