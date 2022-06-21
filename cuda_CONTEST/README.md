@@ -168,7 +168,7 @@ The columns refer to the number of thread used for Edge-related operations, whil
 | 1024           | 4.9 | 10.9 | 10.8 | 11   |
 
 
-
+![graphs](data/ft.png)
 ### Conclusions
 
 In the end, we have fine tuned our custom implementation (16/06 --> 21/06) and verified its correctness (avg >95%)
