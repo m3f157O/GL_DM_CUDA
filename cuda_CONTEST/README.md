@@ -121,6 +121,7 @@ Not being well tailored for our context, the small tweaks that we have to do to 
 
 ## Results
 
+### Final implementations
 We decided to add two more datasets (Stanford and Flickr) to see the speedup relative to the cpu  (Last generation Intel core i7)
 
 We noticed that the speedup increases as exponentially w.r.t. the size of the dataset.
@@ -142,10 +143,30 @@ Stanford is a directed graph, based on highways and roads, while Flickr is an in
 Until the 14/06 implementation, the precision is ALWAYS 100%, the 16/06 one is way faster and in most cases (>95%) the precision is 100%, but for very lonely nodes it may drop down to 60%. The cuBLAS implementation is very stable but far slower 
 
 
-
 I1, I2, ecc. Refers to the rows of the previous table i.e. I1 is 08/06 codebase, I2 is 12/06 ecc.
 Here is a visualization :
 ![graphs](data/graphs.png)
+
+
+### Final tuning and cpu confrontation
+
+After some tuning on convergence factor, we noticed the speedup on the 21/06 codebase was 1.2 w.r.t. the 16/06 one
+
+
+
+We also tried to fine tune the threads on California.mtx
+
+The columns refer to the number of thread used for Edge-related operations, while the Rows are the Vertex-related operation's ones
+
+
+| E/V COLUMN/ROW | 64  | 128  | 256  | 512  |
+|----------------|-----|------|------|------|
+| 64             | 4.3 | 10.8 | 11   | 10.8 |
+| 128            | 4.5 | 10.9 | 10.9 | 10.8 |
+| 256            | 4.5 | 11   | 10.8 | 10.9 |
+| 512            | 4.5 | 10.9 | 10.8 | 10.8 |
+| 1024           | 4.9 | 10.9 | 10.8 | 11   |
+
 
 
 
