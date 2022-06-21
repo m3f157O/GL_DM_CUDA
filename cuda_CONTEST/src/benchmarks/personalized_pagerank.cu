@@ -199,7 +199,7 @@ __global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_
     bool converged = false;
     double *temp;
 
-    while (!converged && iter < max_iterations) {
+    while (!converged && iter<max_iterations) {
 
         spmv_coo_gpu<<<num_blocks,threads_per_block,0,s1>>>(x, y, val, pr, pr_tmp, E, V);
 
@@ -294,13 +294,14 @@ void PersonalizedPageRank::alloc() {
     cudaMalloc((void **)&val_gpu, val_size);
     cudaMalloc((void **)&pr_gpu, V_size);
     cudaMalloc((void **)&pr_tmp_gpu, V_size);
-    cudaMalloc((void **)&dangling_gpu, dangling_size);
-    cudaMalloc((void **)&V_gpu, sizeof(int));
     cudaMalloc((void **)&alpha_gpu, sizeof(double));
-    cudaMalloc((void **)&personalization_vertex_gpu, sizeof(int));
+    cudaMalloc((void **)&V_gpu, sizeof(int));
     cudaMalloc((void **)&E_gpu, sizeof(int));
+    cudaMalloc((void **)&personalization_vertex_gpu, sizeof(int));
 
-    if(implementation == 1) {
+    if(implementation != 1) {
+        cudaMalloc((void **)&dangling_gpu, dangling_size);
+    } else {
         cudaMalloc((void **)&dangling_factor_gpu, sizeof(double));
         cudaMalloc((void **)&beta_gpu, sizeof(double));
         cudaMalloc((void **)&error_gpu, sizeof(double));
@@ -313,50 +314,44 @@ void PersonalizedPageRank::alloc() {
 // Initialize data;
 void PersonalizedPageRank::init() {
     // Do any additional CPU or GPU setup here;
-    x_array = &x[0];
-    y_array = &y[0];
-    dangling_array = &dangling[0];
-    val_array = &val[0];
-    pr_array = &pr[0];
 
-    cudaMemcpy(x_gpu, x_array, E_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(y_gpu, y_array, E_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(val_gpu, val_array, val_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(dangling_gpu, dangling_array, dangling_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(x_gpu, &x[0], E_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(y_gpu, &y[0], E_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(val_gpu, &val[0], val_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(alpha_gpu, &alpha, sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(V_gpu, &V, sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(E_gpu, &E, sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(alpha_gpu, &alpha, sizeof(double), cudaMemcpyHostToDevice);
 
-
-    if(implementation == 1) {
+    if(implementation != 1) {
+        cudaMemcpy(dangling_gpu, &dangling[0], dangling_size, cudaMemcpyHostToDevice);
+    } else {
         std::vector<double> dangling_tmp(dangling.begin(), dangling.end());
-        double *dangling_tmp_array = &dangling_tmp[0];
-        cublasSetVector(V, sizeof(double), dangling_tmp_array, 1, dangling_double_gpu, 1);
+        cudaMemcpy(dangling_double_gpu, &dangling_tmp[0], V * sizeof(double), cudaMemcpyHostToDevice);
     }
+
+    // Reset the PageRank vector (uniform initialization, 1 / V for each vertex);
+    std::fill(pr.begin(), pr.end(), 1.0 / V);
+    cudaMemcpy(pr_gpu, &pr[0], V_size, cudaMemcpyHostToDevice);
 }
 
 // Reset the state of the computation after every iteration.
 // Reset the result, and transfer data to the GPU if necessary;
 void PersonalizedPageRank::reset() {
-    // Reset the PageRank vector (uniform initialization, 1 / V for each vertex);
-    std::fill(pr.begin(), pr.end(), 1.0 / V);
     // Generate a new personalization vertex for this iteration;
     personalization_vertex = rand() % V;
     if (debug) std::cout << "personalization vertex=" << personalization_vertex << std::endl;
 
     // Do any GPU reset here, and also transfer data to the GPU;
-    cudaMemcpy(pr_gpu, pr_array, V_size, cudaMemcpyHostToDevice);
     cudaMemcpy(personalization_vertex_gpu, &personalization_vertex, sizeof(int), cudaMemcpyHostToDevice);
 }
 
 void PersonalizedPageRank::execute(int iteration) {
-
     // Do the GPU computation here, and also transfer results to the CPU;
 
-    if(implementation == 0) {
+    if(implementation != 1) {
         main_kernel<<<1,1>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, dangling_gpu, alpha_gpu, personalization_vertex_gpu, max_iterations, convergence_threshold, E_gpu, V_gpu);
 
-    } else if(implementation == 1) {
+    } else {
 
         cublasHandle_t handle;
         cublasCreate(&handle);
@@ -374,7 +369,7 @@ void PersonalizedPageRank::execute(int iteration) {
         bool converged = false;
         double error;
 
-        while (!converged && iter < max_iterations) {
+        while (!converged && iter<max_iterations) {
 
             spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x_gpu, y_gpu, val_gpu, pr_gpu, pr_tmp_gpu, E_gpu, V_gpu);
 
@@ -398,21 +393,16 @@ void PersonalizedPageRank::execute(int iteration) {
         cublasDestroy(handle);
     }
 
-    cudaMemcpy(pr_array, pr_gpu, V_size, cudaMemcpyDeviceToHost);
+    cudaMemcpy(&pr[0], pr_gpu, V_size, cudaMemcpyDeviceToHost);
 }
 
 void PersonalizedPageRank::cpu_validation(int iter) {
 
     // Reset the CPU PageRank vector (uniform initialization, 1 / V for each vertex);
-
-    ////// INITIALIZE DUMMY VECTOR WITH 1/V FLOAT
     std::fill(pr_golden.begin(), pr_golden.end(), 1.0 / V);
 
     // Do Personalized PageRank on CPU;
     auto start_tmp = clock_type::now();
-    /////// pass x (starting edge vertex) y (arriving edge vertex)  OK
-    /// val ( is all one at starting )
-    /// pr_golden (pagerank scores)
     personalized_pagerank_cpu(x.data(), y.data(), val.data(), V, E, pr_golden.data(), dangling.data(), personalization_vertex, alpha, convergence_threshold, max_iterations);
     auto end_tmp = clock_type::now();
     auto exec_time = chrono::duration_cast<chrono::microseconds>(end_tmp - start_tmp).count();
@@ -438,7 +428,7 @@ void PersonalizedPageRank::cpu_validation(int iter) {
             double pr_val_cpu = sorted_pr_golden_tuples[i].second;
             if (pr_id_gpu != pr_id_cpu) {
                 std::cout << "* error in rank! (" << i << ") correct=" << pr_id_cpu << " (val=" << pr_val_cpu << "), found=" << pr_id_gpu << " (val=" << pr_val_gpu << ")" << std::endl;
-            } else if (std::abs(sorted_pr_tuples[i].second - sorted_pr_golden_tuples[i].second) > 1e-6) {
+            } else if (std::abs(sorted_pr_tuples[i].second - sorted_pr_golden_tuples[i].second) > convergence_threshold) {
                 std::cout << "* error in value! (" << i << ") correct=" << pr_id_cpu << " (val=" << pr_val_cpu << "), found=" << pr_id_gpu << " (val=" << pr_val_gpu << ")" << std::endl;
             }
         }
@@ -471,18 +461,18 @@ std::string PersonalizedPageRank::print_result(bool short_form) {
 
 void PersonalizedPageRank::clean() {
     // Delete any GPU data or additional CPU data;
-    cudaFree(x_gpu);
-    cudaFree(y_gpu);
-    cudaFree(val_gpu);
-    cudaFree(pr_gpu);
-    cudaFree(pr_tmp_gpu);
-    cudaFree(dangling_gpu);
-    cudaFree(V_gpu);
-    cudaFree(alpha_gpu);
-    cudaFree(personalization_vertex_gpu);
-    cudaFree(E_gpu);
-
-    if(implementation == 1) {
+    if(implementation != 1) {
+        cudaFree(x_gpu);
+        cudaFree(y_gpu);
+        cudaFree(val_gpu);
+        cudaFree(pr_gpu);
+        cudaFree(pr_tmp_gpu);
+        cudaFree(dangling_gpu);
+        cudaFree(V_gpu);
+        cudaFree(alpha_gpu);
+        cudaFree(personalization_vertex_gpu);
+        cudaFree(E_gpu);
+    } else {
         cudaFree(dangling_factor_gpu);
         cudaFree(beta_gpu);
         cudaFree(error_gpu);

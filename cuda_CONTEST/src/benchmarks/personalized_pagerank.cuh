@@ -147,9 +147,6 @@ class PersonalizedPageRank : public Benchmark {
     std::string graph_file_path = DEFAULT_GRAPH;
     double precision_to_print = 0;
 
-    // GPU STUFF
-    int *x_array, *y_array, *dangling_array;
-    double *pr_array, *val_array, *pr_tmp_array;
     // Pointers for VRAM data
     int *x_gpu, *y_gpu, *dangling_gpu, *V_gpu, *E_gpu, *personalization_vertex_gpu;
     double *val_gpu, *pr_gpu, *alpha_gpu, *pr_tmp_gpu;
