@@ -128,13 +128,13 @@ We noticed that the speedup increases as exponentially w.r.t. the size of the da
 
 The following values are roundings in milliseconds of the execution times of the implementation at a given time (Rows) on a certain dataset(Columns)
 
-| X          | 08/06 | 12/06 | 13/06 | 13/06 | 14/06 | 16/06 | cuBLAS |
-|------------|-------|-------|-------|-------|-------|-------|--------|
-| small      | 2     | 2     | 1     | 1     | 1     | 1     |   2    |
-| Stanford   | 15    | 15    | 14    | 12    | 6     | 5     |   10   |
-| California | 11    | 7     | 6     | 6     | 3     | 2     |   7    |
-| Flickr     | 241   | 216   | 158   | 156   | 145   | 141   |   168  |
-| Wiki       | 1348  | 1311  | 1157  | 1030  | 1117  | 1087  |   1289 |
+| X          | 08/06 | 12/06 | 13/06 | 13/06 | 14/06 | 16/06 | cuBLAS | CPU |
+|------------|-------|-------|-------|-------|-------|-------|--------|-|
+| small      | 2     | 2     | 1     | 1     | 1     | 1     |   2    | 0.05 |
+| Stanford   | 15    | 15    | 14    | 12    | 6     | 5     |   10   | 5 |
+| California | 11    | 7     | 6     | 6     | 3     | 2     |   7    | 8.6|
+| Flickr     | 241   | 216   | 158   | 156   | 145   | 141   |   168  | 1643|
+| Wiki       | 1348  | 1311  | 1157  | 1030  | 1117  | 1087  |   1289 | 12967|
 
 The GPU is an RTX 2060 mobile
 
@@ -169,5 +169,11 @@ The columns refer to the number of thread used for Edge-related operations, whil
 
 
 
+### Conclusions
 
+In the end, we have fine tuned our custom implementation (16/06 --> 21/06) and verified its correctness (avg >95%)
+
+The cuBLAS implementation is slower than our custom, because we used general-purpose libraries for our custom implementation
+
+Running the code with -I 0 will our custom implementation
 Running the code with -I 1 will run the cuBlas implementation, which is slower but stabler than our custom, but we kept it for confrontation reasons
