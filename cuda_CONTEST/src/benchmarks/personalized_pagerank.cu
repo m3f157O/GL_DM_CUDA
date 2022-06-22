@@ -229,7 +229,6 @@ __global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_
     cudaStreamDestroy(s1);
     cudaStreamDestroy(s2);
     cudaStreamDestroy(s3);
-    printf("iterations: %d\n", iter);
 }
 
 // CPU Utility functions;
@@ -396,7 +395,6 @@ void PersonalizedPageRank::execute(int iteration) {
             iter++;
         }
         cublasDestroy(handle);
-        printf("iterations: %d", iter);
     }
 
     cudaMemcpy(&pr[0], pr_gpu, V_size, cudaMemcpyDeviceToHost);
@@ -419,8 +417,8 @@ void PersonalizedPageRank::cpu_validation(int iter) {
     std::vector<std::pair<int, double>> sorted_pr_golden_tuples = sort_pr(pr_golden.data(), V);
 
     // Check how many of the correct top-20 PPR vertices are retrieved by the GPU;
-    std::unordered_set<int> top_pr_indices;
-    std::unordered_set<int> top_pr_golden_indices;
+    std::set<int> top_pr_indices;
+    std::set<int> top_pr_golden_indices;
     int old_precision = std::cout.precision();
     std::cout.precision(4);
     int topk = std::min(V, topk_vertices);
