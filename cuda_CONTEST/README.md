@@ -55,26 +55,27 @@ We firstly  analyze the cpu implementation and proceed to parallelize it mostly 
 Then we proceed to optimize the gpu kernels, and then verify the results and decide how to proceed 
 
 ## Trivial optimizations
-First working implementation: Initial time 43ms
+First working implementation, tested on California.mtx: Initial time 50ms
 
 Initial optimizations:
-*Copy back pr at end instead of each iteration -4ms  
-*Initial thread assignment (64 for Vertex-related loops, 512 for edges related loops) -8 ms
-*Remove unnecessary memsets (just useless memsets) -6ms
-*Pointer swap instead of memcpy (for pr and pr_temp swap)-4ms
-*Parallel reduction on euclidean (not really that necessary) -3ms
+* Copy back pr at end instead of each iteration -4ms  
+* Initial thread assignment (64 for Vertex-related loops, 512 for edges related loops) -8 ms
+* Remove unnecessary memsets (just useless memsets) -6ms
+* Pointer swap instead of memcpy (for pr and pr_temp swap)-4ms
 
--25 ms so far for trivial optimizations
+-22 ms so far for trivial optimizations
 
 ## Non-trivial optimizations
 
 Following optimizations:
-*Pipeline memcpy (don't let current loop kernels wait for memcpy completion)-6ms
-*Stream initial implementation (each loop iteration proceeds on its own) -3ms
-*Stream final (error check pipeline, each error is checked while the following loop is already started, tradeoff with sync overhead) -5ms
-*Set memory in kernels (instead of using memset we assign value with loop in kernels) -3ms
+* Pipeline memcpy (don't let current loop kernels wait for memcpy completion)-6ms
+* Stream initial implementation (each loop iteration proceeds on its own) -3ms
+* Stream final (error check pipeline, each error is checked while the following loop is already started, tradeoff with sync overhead) -5ms
+* Set memory in kernels (instead of using memset we assign value with loop in kernels) -3ms
 
--33ms so far for non-trivial optimizations
+-17ms so far for non-trivial optimization
+
+-39ms so far for non-trivial optimizations
 
 
 ## Profiling
@@ -170,6 +171,17 @@ The columns refer to the number of thread used for Edge-related operations, whil
 
 ![graphs](data/ft.png)
 ### Conclusions
+
+After more optimizations (improve error pipeline stream usage) these are the final times
+
+| X          | 08/06 | 22/06 |
+|------------|-------|-------|
+| small      | 2     | <1ms|
+| Stanford   | 15    | 4ms|
+| California | 11    | 2ms|
+| Flickr     | 241   | 103ms|
+| Wiki       | 1348  | 638ms|
+
 
 In the end, we have fine tuned our custom implementation (16/06 --> 21/06) and verified its correctness (avg >95%)
 
