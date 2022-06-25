@@ -81,16 +81,18 @@ __global__ void spmv_coo_gpu_2(const int *x_gpu, const int *y_gpu, const double 
     }
 }
 
-__global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int *V, double *dangling_factor_gpu) {
+__global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int *V, double *dangling_factor_gpu, double *alpha, double *beta) {
 
     int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
     if(thread_id == 0) (*dangling_factor_gpu)=0;
     for(int i=thread_id;i<(*V);i+=blockDim.x*gridDim.x){
         atomicAdd(dangling_factor_gpu, dangling_gpu[i] * pr_gpu[i]);
     }
+    __syncthreads();
+    if (tid == 0) (*beta) = (*dangling_factor) * (*alpha) / (*V);
 }
 
-__global__ void dot_product_gpu_2(int *dangling, double *pr, int *V, double *dangling_factor) {
+__global__ void dot_product_gpu_2(int *dangling, double *pr, int *V, double *dangling_factor, double *alpha, double *beta) {
 
     int tid = threadIdx.x;
     int i = tid+blockIdx.x*blockDim.x;
@@ -109,7 +111,9 @@ __global__ void dot_product_gpu_2(int *dangling, double *pr, int *V, double *dan
         }
 
         if(tid == 0) atomicAdd(dangling_factor, temp[0]);
+        __syncthreads();
     }
+    if (tid == 0) (*beta) = (*dangling_factor) * (*alpha) / (*V);
 }
 
 __global__ void calculateBeta(double *beta, double *dangling_factor, double *alpha, int *V) {
@@ -191,10 +195,6 @@ __device__ double error;
 __device__ bool converged;
 __global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_tmp, int *dangling, double *alpha, int *personalization_vertex, int max_iterations, double convergence_threshold, int *E, int *V) {
 
-    cudaStream_t s1, s2;
-    cudaStreamCreateWithFlags(&s1, cudaStreamNonBlocking);
-    cudaStreamCreateWithFlags(&s2, cudaStreamNonBlocking);
-
     //make block size for E
     int threads_per_block = DEFAULT_THREADS_PER_BLOCK;
     int num_blocks = ((*E) + threads_per_block - 1)/ threads_per_block;
@@ -209,25 +209,21 @@ __global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_
 
     while (!converged && iter<max_iterations) {
 
-        spmv_coo_gpu<<<num_blocks,threads_per_block,0,s1>>>(x, y, val, pr, pr_tmp, E, V);
+        spmv_coo_gpu<<<num_blocks,threads_per_block>>>(x, y, val, pr, pr_tmp, E, V);
 
-        dot_product_gpu_2<<<num_blocks_vertex,threads_per_block_vertex,0,s2>>>(dangling, pr, V, &dangling_factor);
-
-        cudaDeviceSynchronize();
-        beta = dangling_factor * (*alpha) / (*V);
+        dot_product_gpu_2<<<num_blocks_vertex,threads_per_block_vertex>>>(dangling, pr, V, &dangling_factor, alpha, &beta);
 
         axbp_euclidean_distance_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, pr_tmp, &beta, personalization_vertex, &error, pr, V, &converged, convergence_threshold);
 
-        cudaDeviceSynchronize();
         // Update the PageRank vector;
         temp=pr;
         pr=pr_tmp;
         pr_tmp=temp;
 
         iter++;
+
+        cudaDeviceSynchronize();
     }
-    cudaStreamDestroy(s1);
-    cudaStreamDestroy(s2);
 }
 
 // CPU Utility functions;
