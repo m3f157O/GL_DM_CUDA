@@ -191,10 +191,9 @@ __device__ double error;
 __device__ bool converged;
 __global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_tmp, int *dangling, double *alpha, int *personalization_vertex, int max_iterations, double convergence_threshold, int *E, int *V) {
 
-    cudaStream_t s1, s2, s3;
+    cudaStream_t s1, s2;
     cudaStreamCreateWithFlags(&s1, cudaStreamNonBlocking);
     cudaStreamCreateWithFlags(&s2, cudaStreamNonBlocking);
-    cudaStreamCreateWithFlags(&s3, cudaStreamNonBlocking);
 
     //make block size for E
     int threads_per_block = DEFAULT_THREADS_PER_BLOCK;
@@ -217,8 +216,9 @@ __global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_
         cudaDeviceSynchronize();
         beta = dangling_factor * (*alpha) / (*V);
 
-        axbp_euclidean_distance_gpu<<<num_blocks_vertex,threads_per_block_vertex,0,s3>>>(alpha, pr_tmp, &beta, personalization_vertex, &error, pr, V, &converged, convergence_threshold);
+        axbp_euclidean_distance_gpu<<<num_blocks_vertex,threads_per_block_vertex>>>(alpha, pr_tmp, &beta, personalization_vertex, &error, pr, V, &converged, convergence_threshold);
 
+        cudaDeviceSynchronize();
         // Update the PageRank vector;
         temp=pr;
         pr=pr_tmp;
@@ -228,7 +228,6 @@ __global__ void main_kernel(int *x, int *y, double *val, double *pr, double *pr_
     }
     cudaStreamDestroy(s1);
     cudaStreamDestroy(s2);
-    cudaStreamDestroy(s3);
 }
 
 // CPU Utility functions;
