@@ -89,7 +89,7 @@ __global__ void dot_product_gpu(int *dangling_gpu, double *pr_gpu, int *V, doubl
         atomicAdd(dangling_factor_gpu, dangling_gpu[i] * pr_gpu[i]);
     }
     __syncthreads();
-    if (tid == 0) (*beta) = (*dangling_factor) * (*alpha) / (*V);
+    if (thread_id == 0) (*beta) = (*dangling_factor_gpu) * (*alpha) / (*V);
 }
 
 __global__ void dot_product_gpu_2(int *dangling, double *pr, int *V, double *dangling_factor, double *alpha, double *beta) {
